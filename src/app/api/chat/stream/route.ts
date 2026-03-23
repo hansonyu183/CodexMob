@@ -8,6 +8,7 @@ import {
   getConversationMeta,
   listSessionIds,
 } from "@/lib/history/service";
+import { bindUploadsToConversation } from "@/lib/uploads/storage";
 import { fileLogger, limiter, runtime as codexRuntime } from "@/lib/server/runtime-context";
 
 export const runtime = "nodejs";
@@ -213,6 +214,13 @@ export async function POST(request: Request) {
               cwd: resolvedCwd,
               conversationId: resolvedConversationId || null,
             });
+          }
+
+          if (resolvedConversationId && payload.attachments && payload.attachments.length > 0) {
+            await bindUploadsToConversation(
+              payload.attachments.map((item) => item.id),
+              resolvedConversationId,
+            );
           }
 
           enqueueSse(controller, "done", {

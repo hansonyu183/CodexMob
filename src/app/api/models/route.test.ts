@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getAuthStatus = vi.fn();
+const getLocalModelConfig = vi.fn();
 
 vi.mock("@/lib/server/runtime-context", () => ({
   runtime: {
     getAuthStatus,
   },
+}));
+
+vi.mock("@/lib/codex/config", () => ({
+  getLocalModelConfig,
 }));
 
 describe("GET /api/models", () => {
@@ -14,6 +19,11 @@ describe("GET /api/models", () => {
     process.env.DEFAULT_MODEL = "gpt-5.4";
     process.env.ALLOWED_MODELS = "gpt-5.4,gpt-5.3-codex";
     getAuthStatus.mockReset();
+    getLocalModelConfig.mockReset();
+    getLocalModelConfig.mockResolvedValue({
+      defaultModel: "gpt-5.4",
+      models: ["gpt-5.4", "gpt-5.3-codex"],
+    });
   });
 
   it("returns configured models", async () => {
@@ -37,6 +47,54 @@ describe("GET /api/models", () => {
     expect(body.models).toContain("gpt-5.3-codex");
   });
 
+  it("prefers local codex config default model", async () => {
+    getAuthStatus.mockResolvedValue({
+      ready: true,
+      loginMethod: "chatgpt",
+    });
+    getLocalModelConfig.mockResolvedValue({
+      defaultModel: "gpt-5.4-mini",
+      models: ["gpt-5.4-mini", "gpt-5.3-codex"],
+    });
+
+    const { GET } = await import("@/app/api/models/route");
+    const request = new Request("http://localhost/api/models", {
+      headers: {
+        "x-app-access-code": "secret",
+      },
+    });
+
+    const response = await GET(request);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.defaultModel).toBe("gpt-5.4-mini");
+    expect(body.models).toContain("gpt-5.4-mini");
+  });
+
+  it("falls back when local config has no models", async () => {
+    getAuthStatus.mockResolvedValue({
+      ready: true,
+      loginMethod: "chatgpt",
+    });
+    getLocalModelConfig.mockResolvedValue({
+      defaultModel: null,
+      models: [],
+    });
+
+    const { GET } = await import("@/app/api/models/route");
+    const request = new Request("http://localhost/api/models", {
+      headers: {
+        "x-app-access-code": "secret",
+      },
+    });
+
+    const response = await GET(request);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Array.isArray(body.models)).toBe(true);
+    expect(body.models.length).toBeGreaterThan(0);
+  });
+
   it("returns auth required when runtime not ready", async () => {
     getAuthStatus.mockResolvedValue({
       ready: false,
@@ -55,4 +113,3 @@ describe("GET /api/models", () => {
     expect(response.status).toBe(401);
   });
 });
-

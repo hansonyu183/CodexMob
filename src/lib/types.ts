@@ -46,6 +46,16 @@ export interface UploadItem {
   size: number;
 }
 
+export interface AttachmentRef extends UploadItem {
+  conversationId: string;
+}
+
+export interface ResolvedMessageLink {
+  type: "attachment" | "external" | "plain";
+  href?: string;
+  attachmentId?: string;
+}
+
 export interface StreamStatusEvent {
   phase: string;
   detail?: string;
