@@ -1,0 +1,5 @@
+{"id":"IR3NqTln4RWw96bNAoFaE","conversationId":"019d14fc-c68e-74a1-8e55-a162e3c3ad34","role":"user","content":"sync smoke","createdAt":"2026-03-22T11:30:44.760Z","source":"app_overlay","rev":1}
+{"id":"zuj_az1SjIsyvhgx5EVEG","conversationId":"VeNiwBmDuUkfRi3IDlHEh","role":"user","content":"你好","createdAt":"2026-03-22T07:19:45.160Z","source":"app_overlay","rev":3}
+{"id":"B1HSDyS9DUEya4lDpYSLq","conversationId":"VeNiwBmDuUkfRi3IDlHEh","role":"assistant","content":"What do you want me to do in this repo? Provide the task or paste the conversation/content you want me to work from.","createdAt":"2026-03-22T07:19:45.160Z","source":"app_overlay","rev":4}
+{"id":"3yvvMkRl1v9WPJlOV2Nhh","conversationId":"VeNiwBmDuUkfRi3IDlHEh","role":"user","content":"你是谁？","createdAt":"2026-03-22T07:44:35.289Z","source":"app_overlay","rev":5}
+{"id":"esXYK0I545KKUwZs0xMFH","conversationId":"VeNiwBmDuUkfRi3IDlHEh","role":"assistant","content":"请直接说你的任务或贴出要处理的内容。\n\n我会按这个仓库的约束执行；如果涉及代码修改，我会先读相关文件和规则，再动手。","createdAt":"2026-03-22T07:44:35.289Z","source":"app_overlay","rev":6}
