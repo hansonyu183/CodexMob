@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  getMessagePlainText,
-  normalizeLocalPathCandidateForTests,
-} from "@/components/markdown-message";
+import { normalizeLocalPathCandidateForTests } from "@/components/markdown-message";
+import { getMessagePlainText } from "@/lib/messages/text";
 
 describe("getMessagePlainText", () => {
   it("normalizes line breaks and trims surrounding spaces", () => {

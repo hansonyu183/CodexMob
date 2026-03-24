@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 
-import { getMessagePlainText, MarkdownMessage } from "@/components/markdown-message";
 import { consumeSse } from "@/lib/chat/streaming";
 import { getSettings, saveSettings } from "@/lib/db/repository";
 import {
@@ -11,6 +10,7 @@ import {
   loadHistoryMessages,
   runHistorySync,
 } from "@/lib/history/client";
+import { getMessagePlainText } from "@/lib/messages/text";
 import { cn } from "@/lib/utils";
 import type {
   AttachmentRef,
@@ -61,6 +61,11 @@ const TEXT_EXTENSIONS = new Set([
   ".sql",
   ".log",
 ]);
+
+const MarkdownMessage = lazy(async () => {
+  const mod = await import("@/components/markdown-message");
+  return { default: mod.MarkdownMessage };
+});
 
 type UploadQueueItem =
   | ({ localId: string; status: "uploading" } & Pick<UploadItem, "name" | "size">)
@@ -1280,6 +1285,66 @@ export function ChatApp() {
     settingsDraft,
   ]);
 
+  const renderedMessages = useMemo(
+    () =>
+      messages.map((message) => (
+        <article
+          key={message.id}
+          className={cn(
+            "group relative min-w-0 select-text rounded-2xl border px-3 py-3 pr-10 text-sm sm:px-4 sm:pr-11",
+            message.role === "user"
+              ? "ml-auto w-fit max-w-full border-sky-400/30 bg-sky-500/10 text-sky-50 sm:max-w-[92%] md:max-w-[85%]"
+              : "mr-auto w-full max-w-full border-app bg-panel text-app sm:max-w-[92%] md:max-w-[85%]",
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => void copyMessage(message.id, message.content)}
+            className={cn(
+              "absolute right-2 top-2 z-20 rounded-md border border-app px-1.5 py-0.5 text-[11px] text-app-muted transition-opacity select-none touch-manipulation",
+              "opacity-10 hover:bg-app-hover hover:opacity-100 focus:opacity-100 group-hover:opacity-100",
+              copiedMessageId === message.id ? "opacity-100" : "",
+            )}
+            title="复制消息"
+            aria-label="复制消息"
+          >
+            {copiedMessageId === message.id ? "✓" : "⧉"}
+          </button>
+          <div className="mb-1 text-xs uppercase tracking-wide text-app-muted">
+            {message.role === "user" ? "You" : "Codex"}
+          </div>
+          {message.role === "assistant" ? (
+            <Suspense
+              fallback={(
+                <p className="message-text select-text whitespace-pre-wrap break-words leading-7 [overflow-wrap:anywhere]">
+                  {message.content}
+                </p>
+              )}
+            >
+              <MarkdownMessage
+                content={message.content}
+                resolveAttachmentHref={resolveAttachmentHref}
+                onOpenAttachment={(_href, label) => {
+                  void openAttachmentPreview(label);
+                }}
+              />
+            </Suspense>
+          ) : (
+            <p className="message-text select-text whitespace-pre-wrap break-words leading-7 [overflow-wrap:anywhere]">
+              {message.content}
+            </p>
+          )}
+        </article>
+      )),
+    [
+      copiedMessageId,
+      copyMessage,
+      messages,
+      openAttachmentPreview,
+      resolveAttachmentHref,
+    ],
+  );
+
   return (
     <div className="relative flex h-[100dvh] flex-col bg-app">
       <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-app px-3 py-2 backdrop-blur">
@@ -1449,47 +1514,7 @@ export function ChatApp() {
                   输入问题开始对话。当前模式：{runtimeStatus.message}
                 </div>
               ) : null}
-              {messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={cn(
-                    "group relative min-w-0 select-text rounded-2xl border px-3 py-3 pr-10 text-sm sm:px-4 sm:pr-11",
-                    message.role === "user"
-                      ? "ml-auto w-fit max-w-full border-sky-400/30 bg-sky-500/10 text-sky-50 sm:max-w-[92%] md:max-w-[85%]"
-                      : "mr-auto w-full max-w-full border-app bg-panel text-app sm:max-w-[92%] md:max-w-[85%]",
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => void copyMessage(message.id, message.content)}
-                    className={cn(
-                      "absolute right-2 top-2 z-20 rounded-md border border-app px-1.5 py-0.5 text-[11px] text-app-muted transition-opacity select-none touch-manipulation",
-                      "opacity-10 hover:bg-app-hover hover:opacity-100 focus:opacity-100 group-hover:opacity-100",
-                      copiedMessageId === message.id ? "opacity-100" : "",
-                    )}
-                    title="复制消息"
-                    aria-label="复制消息"
-                  >
-                    {copiedMessageId === message.id ? "✓" : "⧉"}
-                  </button>
-                  <div className="mb-1 text-xs uppercase tracking-wide text-app-muted">
-                    {message.role === "user" ? "You" : "Codex"}
-                  </div>
-                  {message.role === "assistant" ? (
-                    <MarkdownMessage
-                      content={message.content}
-                      resolveAttachmentHref={resolveAttachmentHref}
-                      onOpenAttachment={(_href, label) => {
-                        void openAttachmentPreview(label);
-                      }}
-                    />
-                  ) : (
-                    <p className="message-text select-text whitespace-pre-wrap break-words leading-7 [overflow-wrap:anywhere]">
-                      {message.content}
-                    </p>
-                  )}
-                </article>
-              ))}
+              {renderedMessages}
             </div>
           </div>
           {showJumpToLatest ? (
