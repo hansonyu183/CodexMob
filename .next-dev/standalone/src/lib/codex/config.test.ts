@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  normalizeSandboxForTests,
   parseModelsCacheForTests,
   parseTomlModelForTests,
   parseTomlModelListForTests,
+  parseTomlSandboxForTests,
 } from "@/lib/codex/config";
 
 describe("parseTomlModelForTests", () => {
@@ -44,5 +46,24 @@ model = "gpt-5.4"
       ]
     }`);
     expect(models).toEqual(["gpt-5.4", "gpt-5.3-codex"]);
+  });
+
+  it("parses sandbox from [windows] section", () => {
+    const sandbox = parseTomlSandboxForTests(`
+[windows]
+sandbox = "elevated"
+`);
+    expect(sandbox).toBe("danger-full-access");
+  });
+
+  it("parses root-level sandbox", () => {
+    const sandbox = parseTomlSandboxForTests('sandbox = "workspace-write"');
+    expect(sandbox).toBe("workspace-write");
+  });
+
+  it("normalizes known sandbox aliases", () => {
+    expect(normalizeSandboxForTests("read_only")).toBe("read-only");
+    expect(normalizeSandboxForTests("workspace")).toBe("workspace-write");
+    expect(normalizeSandboxForTests("elevated")).toBe("danger-full-access");
   });
 });

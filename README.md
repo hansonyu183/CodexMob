@@ -32,11 +32,21 @@ DEFAULT_MODEL=gpt-5.4
 ALLOWED_MODELS=gpt-5.4,gpt-5.3-codex,gpt-5.2
 CODEX_BIN=codex
 CODEX_CWD=.
-CODEX_SANDBOX=read-only
-CODEX_EXEC_TIMEOUT_MS=30000
+# 可选：read-only / workspace-write / danger-full-access
+# 不配置时默认跟随 ~/.codex/config.toml
+CODEX_SANDBOX=workspace-write
+CODEX_EXEC_TIMEOUT_MS=180000
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX=30
 ```
+
+权限映射说明（自动）：
+
+- `read-only` -> `--sandbox read-only`
+- `workspace-write` -> `--sandbox workspace-write --full-auto`
+- `danger-full-access` -> `--dangerously-bypass-approvals-and-sandbox`
+
+`danger-full-access` 为高风险模式，会跳过审批拦截，请仅在受控本机环境使用。
 
 3. 安装依赖并启动：
 

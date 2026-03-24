@@ -207,4 +207,44 @@ describe("POST /api/chat/stream", () => {
     expect(body).toContain("event: error");
     expect(body).toContain("恢复会话命令参数与当前 Codex CLI 版本不兼容");
   });
+
+  it("maps policy-blocked error to readable message", async () => {
+    limiterCheck.mockReturnValue({
+      allowed: true,
+      remaining: 10,
+      retryAfterMs: 1000,
+    });
+    getAuthStatus.mockResolvedValue({
+      ready: true,
+      loginMethod: "chatgpt",
+    });
+    getConversationMeta.mockResolvedValue({
+      id: "c1",
+      cwd: "D:\\code\\CodexMob",
+    });
+    streamResumeSession.mockRejectedValue(
+      new Error("operation blocked by policy: rejected by user approval settings"),
+    );
+
+    const { POST } = await import("@/app/api/chat/stream/route");
+    const response = await POST(
+      new Request("http://localhost/api/chat/stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-app-access-code": "secret",
+        },
+        body: JSON.stringify({
+          conversationId: "c1",
+          model: "gpt-5.4",
+          input: "please write files",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("event: error");
+    expect(body).toContain("当前会话权限策略不允许写操作");
+  });
 });

@@ -47,3 +47,41 @@
 - Network:       http://198.18.0.1:3001
 ✓ Ready in 146ms
 ⚠ "next start" does not work with "output: standalone" configuration. Use "node .next/standalone/server.js" instead.
+
+> codexmob@0.1.0 start
+> next start
+
+▲ Next.js 16.2.1
+- Local:         http://localhost:3001
+- Network:       http://198.18.0.1:3001
+✓ Ready in 142ms
+⚠ "next start" does not work with "output: standalone" configuration. Use "node .next/standalone/server.js" instead.
+
+> codexmob@0.1.0 start
+> next start
+
+▲ Next.js 16.2.1
+- Local:         http://localhost:3001
+- Network:       http://198.18.0.1:3001
+✓ Ready in 140ms
+⚠ "next start" does not work with "output: standalone" configuration. Use "node .next/standalone/server.js" instead.
+
+> codexmob@0.1.0 start
+> next start
+
+▲ Next.js 16.2.1
+- Local:         http://localhost:3001
+- Network:       http://198.18.0.1:3001
+✓ Ready in 157ms
+⚠ "next start" does not work with "output: standalone" configuration. Use "node .next/standalone/server.js" instead.
+
+> codexmob@0.1.0 start
+> next start
+
+▲ Next.js 16.2.1
+- Local:         http://localhost:3001
+- Network:       http://198.18.0.1:3001
+✓ Ready in 144ms
+⚠ "next start" does not work with "output: standalone" configuration. Use "node .next/standalone/server.js" instead.
+(node:27436) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)

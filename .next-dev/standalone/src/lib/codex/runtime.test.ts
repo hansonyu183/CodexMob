@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildExecArgsForTests,
   buildExecResumeArgsForTests,
+  buildSandboxAndApprovalArgsForTests,
   parseAuthStatusForTests,
 } from "@/lib/codex/runtime";
 
@@ -22,11 +23,10 @@ describe("parseAuthStatusForTests", () => {
     expect(result.loginMethod).toBe("none");
   });
 
-  it("builds exec args with sandbox at exec level", () => {
+  it("builds exec args for read-only mode", () => {
     const args = buildExecArgsForTests({
       sandbox: "read-only",
       model: "gpt-5.4",
-      message: "hello",
     });
     expect(args).toEqual([
       "exec",
@@ -36,7 +36,7 @@ describe("parseAuthStatusForTests", () => {
       "--json",
       "--model",
       "gpt-5.4",
-      "hello",
+      "-",
     ]);
   });
 
@@ -45,7 +45,6 @@ describe("parseAuthStatusForTests", () => {
       sandbox: "read-only",
       model: "gpt-5.4",
       conversationId: "c1",
-      message: "hello again",
     });
     expect(args).toEqual([
       "exec",
@@ -57,7 +56,47 @@ describe("parseAuthStatusForTests", () => {
       "--model",
       "gpt-5.4",
       "c1",
-      "hello again",
+      "-",
     ]);
+  });
+
+  it("builds exec args with full-auto for workspace-write", () => {
+    const args = buildExecArgsForTests({
+      sandbox: "workspace-write",
+      model: "gpt-5.4",
+    });
+    expect(args).toEqual([
+      "exec",
+      "--skip-git-repo-check",
+      "--sandbox",
+      "workspace-write",
+      "--full-auto",
+      "--json",
+      "--model",
+      "gpt-5.4",
+      "-",
+    ]);
+  });
+
+  it("builds exec args with bypass flag for danger-full-access", () => {
+    const args = buildExecArgsForTests({
+      sandbox: "danger-full-access",
+      model: "gpt-5.4",
+    });
+    expect(args).toEqual([
+      "exec",
+      "--skip-git-repo-check",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--json",
+      "--model",
+      "gpt-5.4",
+      "-",
+    ]);
+  });
+
+  it("exposes policy mode mapping", () => {
+    expect(buildSandboxAndApprovalArgsForTests("read-only").policyMode).toBe("read_only");
+    expect(buildSandboxAndApprovalArgsForTests("workspace-write").policyMode).toBe("full_auto");
+    expect(buildSandboxAndApprovalArgsForTests("danger-full-access").policyMode).toBe("bypass_all");
   });
 });

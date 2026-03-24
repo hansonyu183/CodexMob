@@ -13,8 +13,19 @@ import { fileLogger, limiter, runtime as codexRuntime } from "@/lib/server/runti
 
 export const runtime = "nodejs";
 
+function getPolicyModeFromSandbox(sandbox: string): "read_only" | "full_auto" | "bypass_all" {
+  if (sandbox === "danger-full-access") {
+    return "bypass_all";
+  }
+  if (sandbox === "workspace-write") {
+    return "full_auto";
+  }
+  return "read_only";
+}
+
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
+  const policyMode = getPolicyModeFromSandbox(serverEnv.codexSandbox);
 
   const denied = verifyAccessCode(request, serverEnv.appAccessCode);
   if (denied) {
@@ -77,6 +88,8 @@ export async function POST(request: Request) {
     model: payload.model,
     conversationId: payload.conversationId ?? null,
     cwd: payload.cwd ?? null,
+    sandbox: serverEnv.codexSandbox,
+    policyMode,
     inputPreview: payload.input,
   });
 
@@ -195,6 +208,8 @@ export async function POST(request: Request) {
         conversationId: resolvedConversationId || null,
         cwd: resolvedCwd,
         model: payload.model,
+        sandbox: serverEnv.codexSandbox,
+        policyMode,
       });
 
       void run
@@ -240,6 +255,7 @@ export async function POST(request: Request) {
             conversationId: resolvedConversationId || null,
             aborted: result.aborted,
             abortSource,
+            sandbox: serverEnv.codexSandbox,
             usage: result.usage ?? null,
           });
           controller.close();
@@ -252,10 +268,22 @@ export async function POST(request: Request) {
             lowered.includes("migration") &&
             lowered.includes("was previously applied") &&
             lowered.includes("missing in the resolved migrations");
+          const isTimeoutError =
+            lowered.includes("codex execution timed out") ||
+            lowered.includes("codex command timed out");
+          const isPolicyBlocked =
+            lowered.includes("blocked by policy") ||
+            lowered.includes("approval settings") ||
+            lowered.includes("rejected by user approval settings") ||
+            lowered.includes("approval required");
           const message = lowered.includes("unexpected argument '--sandbox'")
             ? "恢复会话命令参数与当前 Codex CLI 版本不兼容，请重试或更新客户端参数。"
             : isCliVersionMismatch
               ? "本机 Codex CLI 版本与本地状态库不兼容，请升级 Codex CLI 后重试。"
+              : isTimeoutError
+                ? "本轮执行超时，请重试或缩短问题范围。"
+                : isPolicyBlocked
+                  ? "当前会话权限策略不允许写操作，请切换到可写或完全控制模式。"
             : request.signal.aborted
               ? "客户端连接已中断，可重试。"
             : rawMessage;
@@ -272,7 +300,15 @@ export async function POST(request: Request) {
             rawMessage,
             mappedMessage: message,
             abortSource: request.signal.aborted ? "client_abort" : "runtime_error",
-            errorCategory: isCliVersionMismatch ? "cli_version_mismatch" : "general_upstream_error",
+            errorCategory: isCliVersionMismatch
+              ? "cli_version_mismatch"
+              : isTimeoutError
+                ? "timeout"
+                : isPolicyBlocked
+                  ? "policy_blocked"
+              : "general_upstream_error",
+            sandbox: serverEnv.codexSandbox,
+            policyMode,
           });
           controller.close();
         });

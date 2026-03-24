@@ -261,6 +261,7 @@ export function ChatApp() {
   const [streamEvents, setStreamEvents] = useState<ProcessEventRow[]>([]);
   const [streamPanelOpen, setStreamPanelOpen] = useState(true);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string>("");
   const abortRef = useRef<AbortController | null>(null);
   const stopRequestedRef = useRef(false);
@@ -354,9 +355,28 @@ export function ChatApp() {
     if (!node) {
       return;
     }
+    if (composerFocused) {
+      setShowJumpToLatest(false);
+      return;
+    }
     const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
     setShowJumpToLatest(distance > 80);
-  }, []);
+  }, [composerFocused]);
+
+  const handleComposerFocus = useCallback(() => {
+    setComposerFocused(true);
+    setShowJumpToLatest(false);
+    window.setTimeout(() => {
+      scrollToLatest("smooth");
+    }, 80);
+  }, [scrollToLatest]);
+
+  const handleComposerBlur = useCallback(() => {
+    setComposerFocused(false);
+    window.setTimeout(() => {
+      handleMessageViewportScroll();
+    }, 0);
+  }, [handleMessageViewportScroll]);
 
   const copyMessage = useCallback(async (messageId: string, content: string) => {
     const text = getMessagePlainText(content);
@@ -1278,7 +1298,7 @@ export function ChatApp() {
             )}
           />
           <select
-            className="min-w-0 flex-1 rounded-lg border border-app bg-panel px-2 py-1.5 text-sm text-app"
+            className="min-w-0 flex-1 rounded-lg border border-app bg-panel px-2 py-1.5 text-base text-app md:text-sm"
             value={selectedModel}
             onChange={(event) => {
               updateModelForScope(event.target.value);
@@ -1292,7 +1312,7 @@ export function ChatApp() {
             ))}
           </select>
           <input
-            className="w-36 rounded-lg border border-app bg-panel px-2 py-1.5 text-xs text-app"
+            className="w-36 rounded-lg border border-app bg-panel px-2 py-1.5 text-base text-app md:text-sm"
             value={customModelInput}
             placeholder="自定义模型"
             onChange={(event) => setCustomModelInput(event.target.value)}
@@ -1556,9 +1576,11 @@ export function ChatApp() {
               <textarea
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
+                onFocus={handleComposerFocus}
+                onBlur={handleComposerBlur}
                 rows={4}
                 placeholder="输入你的问题..."
-                className="w-full resize-none rounded-xl border border-app bg-app px-3 py-2 text-sm text-app outline-none focus:border-sky-400/60"
+                className="w-full resize-none rounded-xl border border-app bg-app px-3 py-2 text-base text-app outline-none focus:border-sky-400/60 md:text-sm"
               />
               <div className="flex items-center justify-between gap-2">
                 <div className="text-xs text-app-muted">
@@ -1679,7 +1701,7 @@ export function ChatApp() {
                   onChange={(event) =>
                     setSettingsDraft((prev) => ({ ...prev, accessCode: event.target.value }))
                   }
-                  className="w-full rounded-lg border border-app bg-app px-3 py-2 text-app"
+                  className="w-full rounded-lg border border-app bg-app px-3 py-2 text-base text-app md:text-sm"
                 />
               </label>
 
@@ -1693,7 +1715,7 @@ export function ChatApp() {
                       theme: event.target.value as AppSettings["theme"],
                     }))
                   }
-                  className="w-full rounded-lg border border-app bg-app px-3 py-2 text-app"
+                  className="w-full rounded-lg border border-app bg-app px-3 py-2 text-base text-app md:text-sm"
                 >
                   <option value="dark">深色</option>
                   <option value="light">浅色</option>

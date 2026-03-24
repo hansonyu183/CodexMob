@@ -1,5 +1,5 @@
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import { promises as fs, readFileSync } from "node:fs";
 
 import { getCodexHome } from "@/lib/history/paths";
 
@@ -13,6 +13,8 @@ const FALLBACK_MODELS = [
   "gpt-5.1-codex-max",
   "gpt-5.1-codex-mini",
 ];
+
+export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
 function parseTomlStringValue(input: string, key: string): string | null {
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -38,6 +40,59 @@ function parseTomlStringValue(input: string, key: string): string | null {
   return null;
 }
 
+function parseTomlSectionStringValue(
+  input: string,
+  section: string,
+  key: string,
+): string | null {
+  const escapedSection = section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const sectionRegex = new RegExp(
+    `^\\s*\\[\\s*${escapedSection}\\s*\\]\\s*$([\\s\\S]*?)(?=^\\s*\\[|\\Z)`,
+    "m",
+  );
+  const matched = input.match(sectionRegex);
+  if (!matched?.[1]) {
+    return null;
+  }
+  return parseTomlStringValue(matched[1], key);
+}
+
+function normalizeSandbox(input: string | null | undefined): CodexSandboxMode | null {
+  if (!input) {
+    return null;
+  }
+  const normalized = input.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === "read-only" || normalized === "readonly" || normalized === "read_only") {
+    return "read-only";
+  }
+
+  if (
+    normalized === "workspace-write" ||
+    normalized === "workspace_write" ||
+    normalized === "workspace" ||
+    normalized === "write"
+  ) {
+    return "workspace-write";
+  }
+
+  if (
+    normalized === "danger-full-access" ||
+    normalized === "danger_full_access" ||
+    normalized === "danger" ||
+    normalized === "full-access" ||
+    normalized === "full" ||
+    normalized === "elevated"
+  ) {
+    return "danger-full-access";
+  }
+
+  return null;
+}
+
 export async function getLocalDefaultModel(): Promise<string | null> {
   const codexHome = getCodexHome();
   const configPath = path.join(codexHome, "config.toml");
@@ -45,6 +100,24 @@ export async function getLocalDefaultModel(): Promise<string | null> {
   try {
     const content = await fs.readFile(configPath, "utf8");
     return parseTomlStringValue(content, "model");
+  } catch {
+    return null;
+  }
+}
+
+function parseTomlSandbox(input: string): CodexSandboxMode | null {
+  const fromWindows = parseTomlSectionStringValue(input, "windows", "sandbox");
+  const fromRoot = parseTomlStringValue(input, "sandbox");
+  return normalizeSandbox(fromWindows ?? fromRoot);
+}
+
+export function getLocalSandboxModeSync(): CodexSandboxMode | null {
+  const codexHome = getCodexHome();
+  const configPath = path.join(codexHome, "config.toml");
+
+  try {
+    const content = readFileSync(configPath, "utf8");
+    return parseTomlSandbox(content);
   } catch {
     return null;
   }
@@ -137,4 +210,12 @@ export function parseTomlModelListForTests(input: string): string[] {
 
 export function parseModelsCacheForTests(input: string): string[] {
   return parseModelsCacheContent(input);
+}
+
+export function parseTomlSandboxForTests(input: string): CodexSandboxMode | null {
+  return parseTomlSandbox(input);
+}
+
+export function normalizeSandboxForTests(input: string | null | undefined): CodexSandboxMode | null {
+  return normalizeSandbox(input);
 }

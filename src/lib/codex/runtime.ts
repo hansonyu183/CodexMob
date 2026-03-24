@@ -44,13 +44,39 @@ interface CodexEvent {
 interface StreamCommandInput {
   args: string[];
   cwd: string;
+  stdinText?: string;
 }
 
 interface ExecCommandArgsInput {
   sandbox: string;
   model: string;
-  message: string;
   images?: string[];
+}
+
+type PolicyMode = "read_only" | "full_auto" | "bypass_all";
+
+function buildSandboxAndApprovalArgs(sandbox: string): {
+  args: string[];
+  policyMode: PolicyMode;
+} {
+  if (sandbox === "danger-full-access") {
+    return {
+      args: ["--dangerously-bypass-approvals-and-sandbox"],
+      policyMode: "bypass_all",
+    };
+  }
+
+  if (sandbox === "workspace-write") {
+    return {
+      args: ["--sandbox", "workspace-write", "--full-auto"],
+      policyMode: "full_auto",
+    };
+  }
+
+  return {
+    args: ["--sandbox", "read-only"],
+    policyMode: "read_only",
+  };
 }
 
 function extractJsonLines(chunk: string, carry: string): { lines: string[]; carry: string } {
@@ -101,11 +127,11 @@ function parseAuthStatus(stdout: string): RuntimeAuthStatus {
 }
 
 function buildExecCommandArgs(input: ExecCommandArgsInput): string[] {
+  const policy = buildSandboxAndApprovalArgs(input.sandbox);
   const args = [
     "exec",
     "--skip-git-repo-check",
-    "--sandbox",
-    input.sandbox,
+    ...policy.args,
     "--json",
     "--model",
     input.model,
@@ -113,16 +139,16 @@ function buildExecCommandArgs(input: ExecCommandArgsInput): string[] {
   for (const image of input.images ?? []) {
     args.push("-i", image);
   }
-  args.push(input.message);
+  args.push("-");
   return args;
 }
 
 function buildExecResumeCommandArgs(input: ExecCommandArgsInput & { conversationId: string }): string[] {
+  const policy = buildSandboxAndApprovalArgs(input.sandbox);
   const args = [
     "exec",
     "--skip-git-repo-check",
-    "--sandbox",
-    input.sandbox,
+    ...policy.args,
     "resume",
     "--json",
     "--model",
@@ -131,7 +157,7 @@ function buildExecResumeCommandArgs(input: ExecCommandArgsInput & { conversation
   for (const image of input.images ?? []) {
     args.push("-i", image);
   }
-  args.push(input.conversationId, input.message);
+  args.push(input.conversationId, "-");
   return args;
 }
 
@@ -221,9 +247,9 @@ export class CodexRuntimeAdapter {
       args: buildExecCommandArgs({
         sandbox,
         model: input.model,
-        message: prompt,
         images: imagePaths,
       }),
+      stdinText: prompt,
     };
     return this.runStreamingCommand(command, options);
   }
@@ -250,9 +276,9 @@ export class CodexRuntimeAdapter {
         sandbox,
         model: input.model,
         conversationId: input.conversationId,
-        message: prompt,
         images: imagePaths,
       }),
+      stdinText: prompt,
     };
     return this.runStreamingCommand(command, options);
   }
@@ -266,8 +292,14 @@ export class CodexRuntimeAdapter {
       env: process.env,
       windowsHide: true,
       shell: process.platform === "win32",
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+
+    if (command.stdinText !== undefined) {
+      child.stdin.setDefaultEncoding("utf8");
+      child.stdin.write(command.stdinText);
+      child.stdin.end();
+    }
 
     let stdoutCarry = "";
     let stderrCarry = "";
@@ -516,4 +548,10 @@ export function buildExecResumeArgsForTests(
   input: ExecCommandArgsInput & { conversationId: string },
 ): string[] {
   return buildExecResumeCommandArgs(input);
+}
+
+export function buildSandboxAndApprovalArgsForTests(
+  sandbox: string,
+): { args: string[]; policyMode: PolicyMode } {
+  return buildSandboxAndApprovalArgs(sandbox);
 }
