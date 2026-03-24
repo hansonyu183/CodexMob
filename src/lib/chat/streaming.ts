@@ -1,4 +1,11 @@
-import type { ApiErrorShape, ChatUsage, StreamStatusEvent, StreamToolEvent } from "@/lib/types";
+import type {
+  ApiErrorShape,
+  ChatUsage,
+  PlanProgress,
+  PlanQuestion,
+  StreamStatusEvent,
+  StreamToolEvent,
+} from "@/lib/types";
 
 export interface StreamCallbacks {
   onToken: (token: string) => void;
@@ -6,6 +13,9 @@ export interface StreamCallbacks {
   onError: (error: ApiErrorShape) => void;
   onStatus?: (event: StreamStatusEvent) => void;
   onTool?: (event: StreamToolEvent) => void;
+  onPlanQuestion?: (event: PlanQuestion) => void;
+  onPlanProgress?: (event: PlanProgress) => void;
+  onPlanReady?: (event: PlanProgress) => void;
 }
 
 export interface StreamState {
@@ -160,6 +170,63 @@ export async function consumeSse(
           callbacks.onTool({
             name: event.name,
             state: event.state,
+            summary: typeof event.summary === "string" ? event.summary : undefined,
+          });
+        }
+      }
+
+      if (parsed.event === "plan_question" && callbacks.onPlanQuestion) {
+        const event = payload as Partial<{
+          items: PlanQuestion[];
+        } & PlanQuestion>;
+        if (Array.isArray(event.items)) {
+          const first = event.items.find(
+            (item) =>
+              typeof item?.id === "string" &&
+              typeof item?.prompt === "string" &&
+              Array.isArray(item?.options),
+          );
+          if (first) {
+            callbacks.onPlanQuestion({
+              id: first.id,
+              prompt: first.prompt,
+              options: first.options as PlanQuestion["options"],
+              allowNote: first.allowNote === true,
+            });
+          }
+        } else if (
+          typeof event.id === "string" &&
+          typeof event.prompt === "string" &&
+          Array.isArray(event.options)
+        ) {
+          callbacks.onPlanQuestion({
+            id: event.id,
+            prompt: event.prompt,
+            options: event.options as PlanQuestion["options"],
+            allowNote: event.allowNote === true,
+          });
+        }
+      }
+
+      if (parsed.event === "plan_progress" && callbacks.onPlanProgress) {
+        const event = payload as Partial<PlanProgress>;
+        if (typeof event.phase === "string") {
+          callbacks.onPlanProgress({
+            phase: event.phase,
+            answered: typeof event.answered === "number" ? event.answered : 0,
+            total: typeof event.total === "number" ? event.total : 0,
+            summary: typeof event.summary === "string" ? event.summary : undefined,
+          });
+        }
+      }
+
+      if (parsed.event === "plan_ready" && callbacks.onPlanReady) {
+        const event = payload as Partial<PlanProgress>;
+        if (typeof event.phase === "string") {
+          callbacks.onPlanReady({
+            phase: event.phase,
+            answered: typeof event.answered === "number" ? event.answered : 0,
+            total: typeof event.total === "number" ? event.total : 0,
             summary: typeof event.summary === "string" ? event.summary : undefined,
           });
         }

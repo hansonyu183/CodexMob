@@ -54,6 +54,25 @@ interface ExecCommandArgsInput {
 }
 
 type PolicyMode = "read_only" | "full_auto" | "bypass_all";
+type InjectionProfile = "default_v1" | "plan_v1";
+
+const PLAN_MODE_INSTRUCTIONS = [
+  "# Plan Mode (Conversational)",
+  "",
+  "You are in plan mode. Do not execute implementation work.",
+  "Gather intent first, then produce a decision-complete implementation plan.",
+  "",
+  "Rules:",
+  "- Ask clarification questions for high-impact ambiguities.",
+  "- If information is insufficient, list the exact points to confirm first.",
+  "- Focus on approach, interfaces, edge cases, tests, and assumptions.",
+  "- Do not output partial implementation or code patches.",
+  "",
+  "Output format:",
+  "- Return exactly one complete plan in a <proposed_plan> block.",
+  "- Keep plan concise but decision complete.",
+  "- Include: Summary, Key Changes, Test Plan, Assumptions.",
+].join("\n");
 
 function buildSandboxAndApprovalArgs(sandbox: string): {
   args: string[];
@@ -169,12 +188,7 @@ function buildPrompt(input: {
   const parts: string[] = [];
 
   if (input.mode === "plan") {
-    parts.push(
-      [
-        "请使用计划模式回答：先澄清关键问题，再给出决策完整的实施计划。",
-        "若信息不足，先列出需要确认的关键点。",
-      ].join("\n"),
-    );
+    parts.push(PLAN_MODE_INSTRUCTIONS);
   }
 
   if (input.textAttachments.length > 0) {
@@ -207,6 +221,10 @@ function splitAttachments(attachments: UploadItem[] | undefined): {
     }
   }
   return { imagePaths, textFiles };
+}
+
+function getInjectionProfile(mode?: ChatMode): InjectionProfile {
+  return mode === "plan" ? "plan_v1" : "default_v1";
 }
 
 export class CodexRuntimeAdapter {
@@ -554,4 +572,16 @@ export function buildSandboxAndApprovalArgsForTests(
   sandbox: string,
 ): { args: string[]; policyMode: PolicyMode } {
   return buildSandboxAndApprovalArgs(sandbox);
+}
+
+export function buildPromptForTests(input: {
+  mode?: ChatMode;
+  message: string;
+  textAttachments: UploadItem[];
+}): string {
+  return buildPrompt(input);
+}
+
+export function getInjectionProfileForTests(mode?: ChatMode): InjectionProfile {
+  return getInjectionProfile(mode);
 }

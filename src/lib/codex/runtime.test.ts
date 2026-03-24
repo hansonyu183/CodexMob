@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildPromptForTests,
   buildExecArgsForTests,
   buildExecResumeArgsForTests,
   buildSandboxAndApprovalArgsForTests,
+  getInjectionProfileForTests,
   parseAuthStatusForTests,
 } from "@/lib/codex/runtime";
 
@@ -98,5 +100,46 @@ describe("parseAuthStatusForTests", () => {
     expect(buildSandboxAndApprovalArgsForTests("read-only").policyMode).toBe("read_only");
     expect(buildSandboxAndApprovalArgsForTests("workspace-write").policyMode).toBe("full_auto");
     expect(buildSandboxAndApprovalArgsForTests("danger-full-access").policyMode).toBe("bypass_all");
+  });
+
+  it("builds plan prompt with plan-mode instruction block before user input", () => {
+    const prompt = buildPromptForTests({
+      mode: "plan",
+      message: "用户问题",
+      textAttachments: [],
+    });
+
+    expect(prompt).toContain("# Plan Mode (Conversational)");
+    expect(prompt.indexOf("# Plan Mode (Conversational)")).toBeLessThan(prompt.indexOf("用户问题"));
+  });
+
+  it("keeps attachments section after plan instructions and before message", () => {
+    const prompt = buildPromptForTests({
+      mode: "plan",
+      message: "请总结",
+      textAttachments: [
+        {
+          id: "u1",
+          name: "a.txt",
+          path: "D:\\code\\a.txt",
+          kind: "text",
+          size: 12,
+        },
+      ],
+    });
+
+    const planPos = prompt.indexOf("# Plan Mode (Conversational)");
+    const attachmentPos = prompt.indexOf("已上传文本文件如下，请按需读取并引用：");
+    const messagePos = prompt.lastIndexOf("请总结");
+
+    expect(planPos).toBeGreaterThanOrEqual(0);
+    expect(attachmentPos).toBeGreaterThan(planPos);
+    expect(messagePos).toBeGreaterThan(attachmentPos);
+  });
+
+  it("maps injection profile by mode", () => {
+    expect(getInjectionProfileForTests("plan")).toBe("plan_v1");
+    expect(getInjectionProfileForTests("default")).toBe("default_v1");
+    expect(getInjectionProfileForTests(undefined)).toBe("default_v1");
   });
 });

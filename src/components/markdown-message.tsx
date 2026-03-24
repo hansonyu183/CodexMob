@@ -1,9 +1,16 @@
 "use client";
 
-import { Children, isValidElement, useMemo, useState, type ReactNode } from "react";
+import {
+  Children,
+  isValidElement,
+  memo,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
 
 interface MarkdownMessageProps {
   content: string;
@@ -16,6 +23,15 @@ const UNC_PATH_REGEX = /\\\\[^\s"'<>|?*]+/g;
 const WINDOWS_ABS_PATH = /^[A-Za-z]:/;
 const UNC_ABS_PATH = /^\\\\[^\\]+\\[^\\]+/;
 const FILE_SCHEME = /^file:\/\//i;
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
+let highlightPluginPromise: Promise<unknown> | null = null;
+
+function loadHighlightPlugin() {
+  if (!highlightPluginPromise) {
+    highlightPluginPromise = import("rehype-highlight").then((mod) => mod.default);
+  }
+  return highlightPluginPromise;
+}
 
 function toWindowsAbsolutePath(value: string): string | null {
   if (!/^[A-Za-z]:/.test(value)) {
@@ -222,18 +238,40 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
   );
 }
 
-export function MarkdownMessage({
+export const MarkdownMessage = memo(function MarkdownMessage({
   content,
   resolveAttachmentHref,
   onOpenAttachment,
 }: MarkdownMessageProps) {
   const safeContent = useMemo(() => content || "", [content]);
+  const [highlightPlugin, setHighlightPlugin] = useState<unknown | null>(null);
+  const needsHighlight = safeContent.includes("```");
+
+  useEffect(() => {
+    if (!needsHighlight) {
+      return;
+    }
+    let canceled = false;
+    void loadHighlightPlugin().then((plugin) => {
+      if (!canceled) {
+        setHighlightPlugin(plugin);
+      }
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [needsHighlight]);
+
+  const rehypePlugins = useMemo(
+    () => (highlightPlugin ? [highlightPlugin as never] : []),
+    [highlightPlugin],
+  );
 
   return (
     <div className="message-text min-w-0 select-text break-words [overflow-wrap:anywhere]">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+        rehypePlugins={rehypePlugins}
         components={{
           code(props) {
             const { className, children } = props;
@@ -310,8 +348,6 @@ export function MarkdownMessage({
       </ReactMarkdown>
     </div>
   );
-}
+});
 
-export function getMessagePlainText(input: string): string {
-  return input.replace(/\r\n/g, "\n").trim();
-}
+MarkdownMessage.displayName = "MarkdownMessage";

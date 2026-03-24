@@ -29,14 +29,52 @@ export interface AppSettings {
 
 export interface ChatRequestPayload {
   conversationId?: string;
+  planSessionId?: string;
   cwd?: string;
   model: string;
   input: string;
   mode?: ChatMode;
+  planAnswer?: PlanAnswer;
+  planAnswers?: PlanAnswer[];
   attachments?: UploadItem[];
 }
 
 export type ChatMode = "default" | "plan";
+
+export interface PlanAnswer {
+  questionId: string;
+  option: string;
+  note?: string;
+}
+
+export interface PlanQuestionOption {
+  value: string;
+  label: string;
+  description: string;
+  recommended?: boolean;
+}
+
+export interface PlanQuestion {
+  id: string;
+  prompt: string;
+  options: PlanQuestionOption[];
+  allowNote: boolean;
+}
+
+export interface PlanProgress {
+  phase: string;
+  answered: number;
+  total: number;
+  summary?: string;
+  round?: number;
+  answeredCount?: number;
+  batchSize?: number;
+  minQuestions?: number;
+  maxQuestions?: number;
+  baseRounds?: number;
+  isSupplementalRound?: boolean;
+  discovery?: string[];
+}
 
 export interface UploadItem {
   id: string;
@@ -82,6 +120,7 @@ export interface RuntimeAuthStatus {
 export interface ModelsResponse {
   defaultModel: string;
   models: string[];
+  modelCaps?: Record<string, { contextWindow: number }>;
 }
 
 export type ApiErrorCode =

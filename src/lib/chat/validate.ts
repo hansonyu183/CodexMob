@@ -24,12 +24,63 @@ export function validateChatPayload(input: unknown): ChatRequestPayload | null {
     payload.conversationId = raw.conversationId.trim();
   }
 
+  if (typeof raw.planSessionId === "string" && raw.planSessionId.trim()) {
+    payload.planSessionId = raw.planSessionId.trim();
+  }
+
   if (typeof raw.cwd === "string" && raw.cwd.trim()) {
     payload.cwd = raw.cwd.trim();
   }
 
   if (raw.mode === "default" || raw.mode === "plan") {
     payload.mode = raw.mode;
+  }
+
+  if (typeof raw.planAnswer === "object" && raw.planAnswer !== null) {
+    const answer = raw.planAnswer as Record<string, unknown>;
+    if (
+      typeof answer.questionId !== "string" ||
+      !answer.questionId.trim() ||
+      typeof answer.option !== "string" ||
+      !answer.option.trim()
+    ) {
+      return null;
+    }
+    payload.planAnswer = {
+      questionId: answer.questionId.trim(),
+      option: answer.option.trim(),
+      note:
+        typeof answer.note === "string" && answer.note.trim()
+          ? answer.note.trim()
+          : undefined,
+    };
+  }
+
+  if (Array.isArray(raw.planAnswers)) {
+    const answers: NonNullable<ChatRequestPayload["planAnswers"]> = [];
+    for (const row of raw.planAnswers) {
+      if (typeof row !== "object" || row === null) {
+        return null;
+      }
+      const answer = row as Record<string, unknown>;
+      if (
+        typeof answer.questionId !== "string" ||
+        !answer.questionId.trim() ||
+        typeof answer.option !== "string" ||
+        !answer.option.trim()
+      ) {
+        return null;
+      }
+      answers.push({
+        questionId: answer.questionId.trim(),
+        option: answer.option.trim(),
+        note:
+          typeof answer.note === "string" && answer.note.trim()
+            ? answer.note.trim()
+            : undefined,
+      });
+    }
+    payload.planAnswers = answers;
   }
 
   if (Array.isArray(raw.attachments)) {
