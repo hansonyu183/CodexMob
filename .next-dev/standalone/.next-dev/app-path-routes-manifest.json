@@ -1,0 +1,18 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/auth/status/route": "/api/auth/status",
+  "/api/chat/stream/route": "/api/chat/stream",
+  "/api/files/conversations/[id]/route": "/api/files/conversations/[id]",
+  "/api/files/download/[id]/route": "/api/files/download/[id]",
+  "/api/files/preview/[id]/route": "/api/files/preview/[id]",
+  "/api/history/conversations/[id]/messages/route": "/api/history/conversations/[id]/messages",
+  "/api/history/conversations/route": "/api/history/conversations",
+  "/api/history/migrate/legacy/route": "/api/history/migrate/legacy",
+  "/api/history/sync/run/route": "/api/history/sync/run",
+  "/api/local/open/route": "/api/local/open",
+  "/api/models/route": "/api/models",
+  "/api/uploads/route": "/api/uploads",
+  "/favicon.ico/route": "/favicon.ico",
+  "/page": "/"
+}

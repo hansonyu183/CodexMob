@@ -77,6 +77,7 @@ export async function POST(request: Request) {
     model: payload.model,
     conversationId: payload.conversationId ?? null,
     cwd: payload.cwd ?? null,
+    sandbox: serverEnv.codexSandbox,
     inputPreview: payload.input,
   });
 
@@ -195,6 +196,7 @@ export async function POST(request: Request) {
         conversationId: resolvedConversationId || null,
         cwd: resolvedCwd,
         model: payload.model,
+        sandbox: serverEnv.codexSandbox,
       });
 
       void run
@@ -228,12 +230,19 @@ export async function POST(request: Request) {
             aborted: result.aborted,
             conversationId: resolvedConversationId || null,
           });
+          const abortSource = result.aborted
+            ? request.signal.aborted
+              ? "client_abort"
+              : "runtime_abort"
+            : "none";
           await fileLogger.log({
             ts: new Date().toISOString(),
             type: "stream_done",
             requestId,
             conversationId: resolvedConversationId || null,
             aborted: result.aborted,
+            abortSource,
+            sandbox: serverEnv.codexSandbox,
             usage: result.usage ?? null,
           });
           controller.close();
@@ -242,8 +251,21 @@ export async function POST(request: Request) {
           const rawMessage =
             error instanceof Error ? error.message : "Failed to stream from Codex.";
           const lowered = rawMessage.toLowerCase();
+          const isCliVersionMismatch =
+            lowered.includes("migration") &&
+            lowered.includes("was previously applied") &&
+            lowered.includes("missing in the resolved migrations");
+          const isTimeoutError =
+            lowered.includes("codex execution timed out") ||
+            lowered.includes("codex command timed out");
           const message = lowered.includes("unexpected argument '--sandbox'")
             ? "恢复会话命令参数与当前 Codex CLI 版本不兼容，请重试或更新客户端参数。"
+            : isCliVersionMismatch
+              ? "本机 Codex CLI 版本与本地状态库不兼容，请升级 Codex CLI 后重试。"
+              : isTimeoutError
+                ? "本轮执行超时，请重试或缩短问题范围。"
+            : request.signal.aborted
+              ? "客户端连接已中断，可重试。"
             : rawMessage;
           enqueueSse(controller, "error", {
             code: "UPSTREAM_ERROR",
@@ -257,6 +279,13 @@ export async function POST(request: Request) {
             cwd: resolvedCwd,
             rawMessage,
             mappedMessage: message,
+            abortSource: request.signal.aborted ? "client_abort" : "runtime_error",
+            errorCategory: isCliVersionMismatch
+              ? "cli_version_mismatch"
+              : isTimeoutError
+                ? "timeout"
+              : "general_upstream_error",
+            sandbox: serverEnv.codexSandbox,
           });
           controller.close();
         });

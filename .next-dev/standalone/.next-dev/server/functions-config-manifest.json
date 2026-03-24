@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "functions": {
+    "/api/chat/stream": {},
+    "/api/files/conversations/[id]": {},
+    "/api/files/download/[id]": {},
+    "/api/files/preview/[id]": {},
+    "/api/local/open": {},
+    "/api/uploads": {}
+  }
+}

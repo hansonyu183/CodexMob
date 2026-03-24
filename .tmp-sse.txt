@@ -1,0 +1,9 @@
+event: ready
+data: {"conversationId":null,"model":"gpt-5.3-codex"}
+
+event: status
+data: {"phase":"thinking","detail":"正在处理请求"}
+
+event: error
+data: {"code":"UPSTREAM_ERROR","message":"2026-03-24T02:32:21.565346Z  WARN codex_state::runtime: failed to open state db at \\\\?\\C:\\Users\\dell\\.codex\\state_5.sqlite: migration 19 was previously applied but is missing in the resolved migrations\n2026-03-24T02:32:21.565408Z  WARN codex_core::state_db: failed to initialize state runtime at \\\\?\\C:\\Users\\dell\\.codex: migration 19 was previously applied but is missing in the resolved migrations\n2026-03-24T02:32:21.566937Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell"}
+

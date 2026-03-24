@@ -1,0 +1,10 @@
+
+> codexmob@0.1.0 dev
+> next dev --webpack
+
+▲ Next.js 16.2.1 (webpack)
+- Local:         http://localhost:3001
+- Network:       http://198.18.0.1:3001
+- Environments: .env.local
+✓ Ready in 376ms
+[?25h

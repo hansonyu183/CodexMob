@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getAuthStatus = vi.fn();
 const getLocalModelConfig = vi.fn();
+const getLocalSandboxModeSync = vi.fn();
 
 vi.mock("@/lib/server/runtime-context", () => ({
   runtime: {
@@ -11,6 +12,7 @@ vi.mock("@/lib/server/runtime-context", () => ({
 
 vi.mock("@/lib/codex/config", () => ({
   getLocalModelConfig,
+  getLocalSandboxModeSync,
 }));
 
 describe("GET /api/models", () => {
@@ -20,6 +22,8 @@ describe("GET /api/models", () => {
     process.env.ALLOWED_MODELS = "gpt-5.4,gpt-5.3-codex";
     getAuthStatus.mockReset();
     getLocalModelConfig.mockReset();
+    getLocalSandboxModeSync.mockReset();
+    getLocalSandboxModeSync.mockReturnValue("read-only");
     getLocalModelConfig.mockResolvedValue({
       defaultModel: "gpt-5.4",
       models: ["gpt-5.4", "gpt-5.3-codex"],

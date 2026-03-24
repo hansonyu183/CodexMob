@@ -1,0 +1,18 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/auth/status/route": "app/api/auth/status/route.js",
+  "/api/chat/stream/route": "app/api/chat/stream/route.js",
+  "/api/files/conversations/[id]/route": "app/api/files/conversations/[id]/route.js",
+  "/api/files/download/[id]/route": "app/api/files/download/[id]/route.js",
+  "/api/files/preview/[id]/route": "app/api/files/preview/[id]/route.js",
+  "/api/history/conversations/[id]/messages/route": "app/api/history/conversations/[id]/messages/route.js",
+  "/api/history/conversations/route": "app/api/history/conversations/route.js",
+  "/api/history/migrate/legacy/route": "app/api/history/migrate/legacy/route.js",
+  "/api/history/sync/run/route": "app/api/history/sync/run/route.js",
+  "/api/local/open/route": "app/api/local/open/route.js",
+  "/api/models/route": "app/api/models/route.js",
+  "/api/uploads/route": "app/api/uploads/route.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/page": "app/page.js"
+}

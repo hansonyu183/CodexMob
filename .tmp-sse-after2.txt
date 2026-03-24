@@ -1,0 +1,9 @@
+event: ready
+data: {"conversationId":null,"model":"gpt-5.3-codex"}
+
+event: status
+data: {"phase":"thinking","detail":"正在处理请求"}
+
+event: error
+data: {"code":"UPSTREAM_ERROR","message":"Quota exceeded. Check your plan and billing details."}
+

@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f5f7fb;
+  --panel: #ffffff;
+  --foreground: #1f2937;
+  --muted: #6b7280;
+  --border: rgba(15, 23, 42, 0.12);
+  --hover: rgba(56, 98, 183, 0.08);
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+[data-theme="dark"] {
+  --background: #0b1220;
+  --panel: #111827;
+  --foreground: #e5ecfa;
+  --muted: #9aa8c7;
+  --border: rgba(148, 163, 184, 0.25);
+  --hover: rgba(56, 189, 248, 0.1);
+}
+
+[data-theme="light"] {
+  --background: #f5f7fb;
+  --panel: #ffffff;
+  --foreground: #1f2937;
+  --muted: #6b7280;
+  --border: rgba(15, 23, 42, 0.12);
+  --hover: rgba(56, 98, 183, 0.08);
+}
+
+body {
+  font-family: var(--font-sans), sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+.bg-app {
+  background-color: var(--background);
+}
+
+.bg-panel {
+  background-color: var(--panel);
+}
+
+.border-app {
+  border-color: var(--border);
+}
+
+.text-app {
+  color: var(--foreground);
+}
+
+.text-app-muted {
+  color: var(--muted);
+}
+
+.hover\:bg-app-hover:hover {
+  background-color: var(--hover);
+}
+
+pre code {
+  font-family: var(--font-mono), monospace;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.25);
+  color: inherit;
+}
+
+[data-theme="light"] ::selection {
+  background: rgba(37, 99, 235, 0.18);
+  color: inherit;
+}
+
+a,
+code,
+pre,
+p,
+li,
+span {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+.message-text,
+.message-text * {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default;
+}
+
+button,
+[role="button"] {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.hljs {
+  color: #d6e2ff;
+}
+
+[data-theme="light"] .hljs {
+  color: #0f172a;
+}

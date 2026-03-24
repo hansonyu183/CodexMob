@@ -1,0 +1,9 @@
+event: ready
+data: {"conversationId":null,"model":"gpt-5.3-codex"}
+
+event: status
+data: {"phase":"thinking","detail":"正在处理请求"}
+
+event: error
+data: {"code":"UPSTREAM_ERROR","message":"2026-03-24T02:38:23.019402Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell"}
+

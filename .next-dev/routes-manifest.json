@@ -1,0 +1,159 @@
+{
+  "version": 3,
+  "pages404": true,
+  "appType": "app",
+  "caseSensitive": false,
+  "basePath": "/dev",
+  "redirects": [
+    {
+      "source": "/dev/",
+      "destination": "/dev",
+      "basePath": false,
+      "internal": true,
+      "priority": true,
+      "statusCode": 308,
+      "regex": "^/dev/$"
+    },
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "internal": true,
+      "priority": true,
+      "statusCode": 308,
+      "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
+    }
+  ],
+  "headers": [],
+  "onMatchHeaders": [],
+  "rewrites": {
+    "beforeFiles": [],
+    "afterFiles": [],
+    "fallback": []
+  },
+  "dynamicRoutes": [
+    {
+      "page": "/api/files/conversations/[id]",
+      "regex": "^/api/files/conversations/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/files/conversations/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/files/download/[id]",
+      "regex": "^/api/files/download/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/files/download/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/files/preview/[id]",
+      "regex": "^/api/files/preview/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/files/preview/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/history/conversations/[id]/messages",
+      "regex": "^/api/history/conversations/([^/]+?)/messages(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/history/conversations/(?<nxtPid>[^/]+?)/messages(?:/)?$"
+    }
+  ],
+  "staticRoutes": [
+    {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
+      "page": "/_global-error",
+      "regex": "^/_global\\-error(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_global\\-error(?:/)?$"
+    },
+    {
+      "page": "/_not-found",
+      "regex": "^/_not\\-found(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_not\\-found(?:/)?$"
+    },
+    {
+      "page": "/api/auth/status",
+      "regex": "^/api/auth/status(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/status(?:/)?$"
+    },
+    {
+      "page": "/api/chat/stream",
+      "regex": "^/api/chat/stream(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/chat/stream(?:/)?$"
+    },
+    {
+      "page": "/api/history/conversations",
+      "regex": "^/api/history/conversations(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/history/conversations(?:/)?$"
+    },
+    {
+      "page": "/api/history/migrate/legacy",
+      "regex": "^/api/history/migrate/legacy(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/history/migrate/legacy(?:/)?$"
+    },
+    {
+      "page": "/api/history/sync/run",
+      "regex": "^/api/history/sync/run(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/history/sync/run(?:/)?$"
+    },
+    {
+      "page": "/api/local/open",
+      "regex": "^/api/local/open(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/local/open(?:/)?$"
+    },
+    {
+      "page": "/api/models",
+      "regex": "^/api/models(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/models(?:/)?$"
+    },
+    {
+      "page": "/api/uploads",
+      "regex": "^/api/uploads(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/uploads(?:/)?$"
+    },
+    {
+      "page": "/favicon.ico",
+      "regex": "^/favicon\\.ico(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/favicon\\.ico(?:/)?$"
+    }
+  ],
+  "dataRoutes": [],
+  "rsc": {
+    "header": "rsc",
+    "varyHeader": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "prefetchHeader": "next-router-prefetch",
+    "didPostponeHeader": "x-nextjs-postponed",
+    "contentTypeHeader": "text/x-component",
+    "suffix": ".rsc",
+    "prefetchSegmentHeader": "next-router-segment-prefetch",
+    "prefetchSegmentSuffix": ".segment.rsc",
+    "prefetchSegmentDirSuffix": ".segments",
+    "clientParamParsing": false,
+    "dynamicRSCPrerender": false
+  },
+  "rewriteHeaders": {
+    "pathHeader": "x-nextjs-rewritten-path",
+    "queryHeader": "x-nextjs-rewritten-query"
+  }
+}
