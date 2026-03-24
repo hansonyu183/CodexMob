@@ -4,6 +4,16 @@ import { extractClientIp, verifyAccessCode } from "@/lib/security/access";
 import { enqueueSse, SSE_HEADERS } from "@/lib/sse";
 import { validateChatPayload } from "@/lib/chat/validate";
 import {
+  applyPlanDecision,
+  bindPlanPlannerConversation,
+  buildPlanSessionKey,
+  finalizePlanSession,
+  hasPlanSession,
+  preparePlanSessionTurn,
+  type PlanSessionResult,
+} from "@/lib/plan/state";
+import { resolvePlanDecisionViaCli, resolvePlannerCwd } from "@/lib/plan/planner";
+import {
   findSessionIdByCwd,
   getConversationMeta,
   listSessionIds,
@@ -21,6 +31,43 @@ function getPolicyModeFromSandbox(sandbox: string): "read_only" | "full_auto" | 
     return "full_auto";
   }
   return "read_only";
+}
+
+function getInjectionProfile(mode: "default" | "plan" | undefined): "default_v1" | "plan_v1" {
+  return mode === "plan" ? "plan_v1" : "default_v1";
+}
+
+function createPlanSseResponse(input: {
+  result: PlanSessionResult;
+  conversationId: string;
+  model: string;
+  headers: Headers;
+}) {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      enqueueSse(controller, "ready", {
+        conversationId: input.conversationId || null,
+        model: input.model,
+      });
+
+      if (input.result.kind === "question") {
+        enqueueSse(controller, "plan_progress", input.result.progress);
+        enqueueSse(controller, "plan_question", input.result.question);
+      }
+
+      if (input.result.kind === "ready") {
+        enqueueSse(controller, "plan_ready", input.result.progress);
+      }
+
+      enqueueSse(controller, "done", {
+        aborted: false,
+        conversationId: input.conversationId || null,
+      });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, { headers: input.headers });
 }
 
 export async function POST(request: Request) {
@@ -79,6 +126,7 @@ export async function POST(request: Request) {
     });
     return errorResponse("INVALID_REQUEST", "Invalid chat payload.", 400);
   }
+  const injectionProfile = getInjectionProfile(payload.mode);
 
   await fileLogger.log({
     ts: new Date().toISOString(),
@@ -87,9 +135,12 @@ export async function POST(request: Request) {
     ip,
     model: payload.model,
     conversationId: payload.conversationId ?? null,
+    planSessionId: payload.planSessionId ?? null,
     cwd: payload.cwd ?? null,
     sandbox: serverEnv.codexSandbox,
     policyMode,
+    mode: payload.mode ?? "default",
+    injectionProfile,
     inputPreview: payload.input,
   });
 
@@ -107,6 +158,8 @@ export async function POST(request: Request) {
 
   let resolvedConversationId = payload.conversationId?.trim() || "";
   let resolvedCwd = payload.cwd?.trim() || "";
+  let runtimeInput = payload.input;
+  let isPlanFinalizeTurn = false;
 
   if (resolvedConversationId) {
     const meta = await getConversationMeta({
@@ -136,6 +189,187 @@ export async function POST(request: Request) {
     return errorResponse("INVALID_REQUEST", "新会话必须携带 cwd。", 400);
   }
 
+  const headers = new Headers(SSE_HEADERS);
+  headers.set("X-RateLimit-Remaining", String(rateLimit.remaining));
+  headers.set("X-RateLimit-Reset-Ms", String(rateLimit.retryAfterMs));
+
+  if (payload.mode === "plan") {
+    if (!resolvedConversationId && !payload.planSessionId?.trim()) {
+      return errorResponse(
+        "INVALID_REQUEST",
+        "计划模式新会话缺少 planSessionId，请重新开始本轮计划。",
+        400,
+      );
+    }
+
+    const planKey = buildPlanSessionKey({
+      conversationId: resolvedConversationId || undefined,
+      planSessionId: payload.planSessionId,
+      cwd: resolvedCwd,
+      model: payload.model,
+    });
+    if (!planKey) {
+      return errorResponse(
+        "INVALID_REQUEST",
+        "计划模式会话标识无效，请重新开始本轮计划。",
+        400,
+      );
+    }
+
+    const planAnswers =
+      payload.planAnswers && payload.planAnswers.length > 0
+        ? payload.planAnswers
+        : payload.planAnswer
+          ? [payload.planAnswer]
+          : null;
+
+    if (payload.planAnswers && payload.planAnswers.length > 1) {
+      await fileLogger.log({
+        ts: new Date().toISOString(),
+        type: "plan_answers_compat",
+        requestId,
+        mode: "plan",
+        message: "planAnswers contains multiple entries; only the first one will be used.",
+        planAnswersCount: payload.planAnswers.length,
+        conversationId: resolvedConversationId || null,
+      });
+    }
+
+    if (planAnswers || !hasPlanSession(planKey)) {
+      let plannerContext: ReturnType<typeof preparePlanSessionTurn>["context"];
+      try {
+        const prepared = preparePlanSessionTurn({
+          key: planKey,
+          cwd: resolvedCwd,
+          prompt: payload.input,
+          answer: planAnswers?.[0],
+        });
+        plannerContext = prepared.context;
+      } catch {
+        return errorResponse("INVALID_REQUEST", "计划模式回答与当前问题不匹配。", 400);
+      }
+
+      const plannerCwd = resolvePlannerCwd(serverEnv.codexHome, resolvedCwd);
+      const plannerKnownIds =
+        plannerContext.plannerConversationId || plannerContext.plannerWarm
+          ? null
+          : await listSessionIds();
+      let plannerDecisionResult;
+      const plannerStartedAt = Date.now();
+      try {
+        plannerDecisionResult = await resolvePlanDecisionViaCli({
+          runtime: codexRuntime,
+          model: payload.model,
+          plannerCwd,
+          context: plannerContext,
+          plannerConversationId: plannerContext.plannerConversationId,
+          signal: request.signal,
+        });
+      } catch (error) {
+        await fileLogger.log({
+          ts: new Date().toISOString(),
+          type: "plan_error",
+          requestId,
+          mode: "plan",
+          stage: "planner_turn",
+          message: error instanceof Error ? error.message : "planner_failed",
+          conversationId: resolvedConversationId || null,
+        });
+        return errorResponse("UPSTREAM_ERROR", "计划模式生成澄清问题失败，请重试。", 502);
+      }
+
+      let resolvedPlannerConversationId = plannerContext.plannerConversationId;
+      if (!resolvedPlannerConversationId && plannerKnownIds) {
+        resolvedPlannerConversationId =
+          (await findSessionIdByCwd({
+            cwd: plannerCwd,
+            knownIds: plannerKnownIds,
+          })) || "";
+        if (!resolvedPlannerConversationId && plannerDecisionResult.plannerBranch === "new") {
+          resolvedPlannerConversationId =
+            (await findSessionIdByCwd({
+              cwd: plannerCwd,
+              knownIds: new Set<string>(),
+            })) || "";
+        }
+        if (resolvedPlannerConversationId) {
+          bindPlanPlannerConversation({
+            key: planKey,
+            plannerConversationId: resolvedPlannerConversationId,
+          });
+        }
+      }
+
+      const planStep = applyPlanDecision({
+        key: planKey,
+        decision: plannerDecisionResult.decision,
+      });
+
+      await fileLogger.log({
+        ts: new Date().toISOString(),
+        type: "plan_step",
+        requestId,
+        mode: "plan",
+        stage: planStep.kind,
+        questionSource: planStep.kind === "question" ? "model_planner" : undefined,
+        plannerSessionId: resolvedPlannerConversationId || null,
+        plannerBranch: plannerDecisionResult.plannerBranch,
+        plannerLatencyMs: Date.now() - plannerStartedAt,
+        planStage: planStep.progress.phase,
+        planDecision: planStep.kind === "question" ? "ask_next" : "ready_to_plan",
+        planBatchSize: planStep.kind === "question" ? 1 : 0,
+        planRound: planStep.progress.round ?? 0,
+        readyReason: plannerDecisionResult.decision.reason,
+        conversationId: resolvedConversationId || null,
+      });
+      return createPlanSseResponse({
+        result: planStep,
+        conversationId: resolvedConversationId,
+        model: payload.model,
+        headers,
+      });
+    }
+
+    const finalizeStep = finalizePlanSession({
+      key: planKey,
+      prompt: payload.input,
+    });
+
+    if (finalizeStep.kind !== "finalize") {
+      await fileLogger.log({
+        ts: new Date().toISOString(),
+        type: "plan_step",
+        requestId,
+        mode: "plan",
+        stage: finalizeStep.kind,
+        questionSource: finalizeStep.kind === "question" ? "model_planner" : undefined,
+        planStage: finalizeStep.progress.phase,
+        planDecision: finalizeStep.kind === "question" ? "ask_next" : "ready_to_plan",
+        planBatchSize: finalizeStep.kind === "question" ? 1 : 0,
+        planRound: finalizeStep.progress.round ?? 0,
+        conversationId: resolvedConversationId || null,
+      });
+      return createPlanSseResponse({
+        result: finalizeStep,
+        conversationId: resolvedConversationId,
+        model: payload.model,
+        headers,
+      });
+    }
+
+    runtimeInput = finalizeStep.finalPrompt;
+    isPlanFinalizeTurn = true;
+    await fileLogger.log({
+      ts: new Date().toISOString(),
+      type: "plan_finalize",
+      requestId,
+      mode: "plan",
+      planStage: "completed",
+      planDecision: "finalized",
+      conversationId: resolvedConversationId || null,
+    });
+  }
+
   const knownIds = !resolvedConversationId ? await listSessionIds() : new Set<string>();
   await fileLogger.log({
     ts: new Date().toISOString(),
@@ -144,21 +378,65 @@ export async function POST(request: Request) {
     branch: resolvedConversationId ? "resume" : "new",
     conversationId: resolvedConversationId || null,
     cwd: resolvedCwd,
+    mode: payload.mode ?? "default",
+    injectionProfile,
   });
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      enqueueSse(controller, "ready", {
+      let streamClosed = false;
+      let enqueueAfterCloseBlocked = 0;
+      let streamCloseReason: "done" | "error" | "abort" | "none" = "none";
+      let emittedTokenCount = 0;
+
+      const safeEnqueue = (event: string, data: unknown): boolean => {
+        if (streamClosed) {
+          enqueueAfterCloseBlocked += 1;
+          return false;
+        }
+        try {
+          enqueueSse(controller, event, data);
+          return true;
+        } catch {
+          streamClosed = true;
+          enqueueAfterCloseBlocked += 1;
+          return false;
+        }
+      };
+
+      const safeClose = (reason: "done" | "error" | "abort") => {
+        if (!streamClosed) {
+          streamCloseReason = reason;
+          streamClosed = true;
+          try {
+            controller.close();
+          } catch {
+            // ignore close race
+          }
+          return;
+        }
+        if (streamCloseReason === "none") {
+          streamCloseReason = reason;
+        }
+      };
+
+      safeEnqueue("ready", {
         conversationId: resolvedConversationId || null,
         model: payload.model,
       });
+      if (isPlanFinalizeTurn) {
+        safeEnqueue("status", {
+          phase: "planning_finalizing",
+          detail: "正在生成最终计划",
+        });
+      }
 
       const run = resolvedConversationId
         ? codexRuntime.streamResumeSession(
             {
               conversationId: resolvedConversationId,
               model: payload.model,
-              message: payload.input,
+              message: runtimeInput,
               cwd: resolvedCwd,
               sandbox: serverEnv.codexSandbox,
               mode: payload.mode,
@@ -167,20 +445,21 @@ export async function POST(request: Request) {
             {
               signal: request.signal,
               onToken(token) {
-                enqueueSse(controller, "token", { token });
+                emittedTokenCount += token.length;
+                safeEnqueue("token", { token });
               },
               onStatus(event) {
-                enqueueSse(controller, "status", event);
+                safeEnqueue("status", event);
               },
               onTool(event) {
-                enqueueSse(controller, "tool", event);
+                safeEnqueue("tool", event);
               },
             },
           )
         : codexRuntime.streamNewSession(
             {
               model: payload.model,
-              message: payload.input,
+              message: runtimeInput,
               cwd: resolvedCwd,
               sandbox: serverEnv.codexSandbox,
               mode: payload.mode,
@@ -189,13 +468,14 @@ export async function POST(request: Request) {
             {
               signal: request.signal,
               onToken(token) {
-                enqueueSse(controller, "token", { token });
+                emittedTokenCount += token.length;
+                safeEnqueue("token", { token });
               },
               onStatus(event) {
-                enqueueSse(controller, "status", event);
+                safeEnqueue("status", event);
               },
               onTool(event) {
-                enqueueSse(controller, "tool", event);
+                safeEnqueue("tool", event);
               },
             },
           );
@@ -210,6 +490,8 @@ export async function POST(request: Request) {
         model: payload.model,
         sandbox: serverEnv.codexSandbox,
         policyMode,
+        mode: payload.mode ?? "default",
+        injectionProfile,
       });
 
       void run
@@ -238,7 +520,30 @@ export async function POST(request: Request) {
             );
           }
 
-          enqueueSse(controller, "done", {
+          if (isPlanFinalizeTurn && emittedTokenCount === 0 && !result.aborted) {
+            safeEnqueue("error", {
+              code: "UPSTREAM_ERROR",
+              message: "最终计划未返回内容，请重试。",
+            });
+            await fileLogger.log({
+              ts: new Date().toISOString(),
+              type: "stream_error",
+              requestId,
+              conversationId: resolvedConversationId || null,
+              cwd: resolvedCwd,
+              rawMessage: "plan_finalize_empty_output",
+              mappedMessage: "最终计划未返回内容，请重试。",
+              abortSource: "runtime_error",
+              errorCategory: "finalize_empty_output",
+              sandbox: serverEnv.codexSandbox,
+              policyMode,
+              enqueueAfterCloseBlocked,
+            });
+            safeClose("error");
+            return;
+          }
+
+          safeEnqueue("done", {
             usage: result.usage,
             aborted: result.aborted,
             conversationId: resolvedConversationId || null,
@@ -257,8 +562,10 @@ export async function POST(request: Request) {
             abortSource,
             sandbox: serverEnv.codexSandbox,
             usage: result.usage ?? null,
+            streamCloseReason: result.aborted ? "abort" : "done",
+            enqueueAfterCloseBlocked,
           });
-          controller.close();
+          safeClose(result.aborted ? "abort" : "done");
         })
         .catch(async (error) => {
           const rawMessage =
@@ -287,7 +594,7 @@ export async function POST(request: Request) {
             : request.signal.aborted
               ? "客户端连接已中断，可重试。"
             : rawMessage;
-          enqueueSse(controller, "error", {
+          safeEnqueue("error", {
             code: "UPSTREAM_ERROR",
             message,
           });
@@ -309,15 +616,13 @@ export async function POST(request: Request) {
               : "general_upstream_error",
             sandbox: serverEnv.codexSandbox,
             policyMode,
+            streamCloseReason,
+            enqueueAfterCloseBlocked,
           });
-          controller.close();
+          safeClose(request.signal.aborted ? "abort" : "error");
         });
     },
   });
-
-  const headers = new Headers(SSE_HEADERS);
-  headers.set("X-RateLimit-Remaining", String(rateLimit.remaining));
-  headers.set("X-RateLimit-Reset-Ms", String(rateLimit.retryAfterMs));
 
   return new Response(stream, { headers });
 }

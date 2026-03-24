@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetPlanSessionsForTests } from "@/lib/plan/state";
 
 const getAuthStatus = vi.fn();
 const streamNewSession = vi.fn();
@@ -8,6 +9,8 @@ const getConversationMeta = vi.fn();
 const listSessionIds = vi.fn();
 const findSessionIdByCwd = vi.fn();
 const fileLoggerLog = vi.fn();
+const resolvePlanDecisionViaCli = vi.fn();
+const resolvePlannerCwd = vi.fn();
 
 vi.mock("@/lib/server/runtime-context", () => ({
   runtime: {
@@ -29,6 +32,11 @@ vi.mock("@/lib/history/service", () => ({
   findSessionIdByCwd,
 }));
 
+vi.mock("@/lib/plan/planner", () => ({
+  resolvePlanDecisionViaCli,
+  resolvePlannerCwd,
+}));
+
 describe("POST /api/chat/stream", () => {
   beforeEach(() => {
     process.env.APP_ACCESS_CODE = "secret";
@@ -40,7 +48,36 @@ describe("POST /api/chat/stream", () => {
     listSessionIds.mockReset();
     findSessionIdByCwd.mockReset();
     fileLoggerLog.mockReset();
+    resolvePlanDecisionViaCli.mockReset();
+    resolvePlannerCwd.mockReset();
     fileLoggerLog.mockResolvedValue(undefined);
+    resolvePlannerCwd.mockReturnValue("C:\\Users\\dell\\.codex\\worktrees\\codexmob-plan");
+    resolvePlanDecisionViaCli.mockResolvedValue({
+      plannerBranch: "new",
+      decision: {
+        kind: "ask_next",
+        reason: "need_more_context",
+        question: {
+          id: "q1",
+          prompt: "请确认目标用户类型",
+          allowNote: true,
+          options: [
+            {
+              value: "newbie",
+              label: "小白用户",
+              description: "默认推荐",
+              recommended: true,
+            },
+            {
+              value: "mixed",
+              label: "混合用户",
+              description: "补充经验差异",
+            },
+          ],
+        },
+      },
+    });
+    resetPlanSessionsForTests();
   });
 
   it("streams new session and returns detected conversationId", async () => {
@@ -140,6 +177,101 @@ describe("POST /api/chat/stream", () => {
     expect(streamNewSession).not.toHaveBeenCalled();
   });
 
+  it("logs mode and injection profile for plan requests", async () => {
+    limiterCheck.mockReturnValue({
+      allowed: true,
+      remaining: 10,
+      retryAfterMs: 1000,
+    });
+    getAuthStatus.mockResolvedValue({
+      ready: true,
+      loginMethod: "chatgpt",
+    });
+    listSessionIds.mockResolvedValue(new Set(["old-1"]));
+    findSessionIdByCwd.mockResolvedValue("new-1");
+    streamNewSession.mockResolvedValue({
+      text: "ok",
+      aborted: false,
+      usage: { output_tokens: 1 },
+    });
+
+    const { POST } = await import("@/app/api/chat/stream/route");
+    const response = await POST(
+      new Request("http://localhost/api/chat/stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-app-access-code": "secret",
+        },
+        body: JSON.stringify({
+          model: "gpt-5.4",
+          cwd: "D:\\code\\CodexMob",
+          input: "hello",
+          mode: "plan",
+          planSessionId: "plan-1",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      fileLoggerLog.mock.calls.some(
+        ([entry]) =>
+          entry?.type === "request_received" &&
+          entry?.mode === "plan" &&
+          entry?.injectionProfile === "plan_v1",
+      ),
+    ).toBe(true);
+    expect(
+      fileLoggerLog.mock.calls.some(
+        ([entry]) =>
+          entry?.type === "plan_step" &&
+          entry?.planDecision === "ask_next" &&
+          entry?.planStage === "clarifying" &&
+          entry?.questionSource === "model_planner",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns a context-aware plan question from planner turn", async () => {
+    limiterCheck.mockReturnValue({
+      allowed: true,
+      remaining: 10,
+      retryAfterMs: 1000,
+    });
+    getAuthStatus.mockResolvedValue({
+      ready: true,
+      loginMethod: "chatgpt",
+    });
+    listSessionIds.mockResolvedValue(new Set());
+
+    const { POST } = await import("@/app/api/chat/stream/route");
+    const response = await POST(
+      new Request("http://localhost/api/chat/stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-app-access-code": "secret",
+        },
+        body: JSON.stringify({
+          model: "gpt-5.4",
+          cwd: "D:\\code\\CodexMob",
+          input: "创建1个skill，用于面对小白用户，并拆分为多个合理边界的skill+sop",
+          mode: "plan",
+          planSessionId: "plan-2",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("event: plan_question");
+    expect(body).toContain("请确认目标用户类型");
+    expect(resolvePlanDecisionViaCli).toHaveBeenCalledTimes(1);
+    expect(streamNewSession).not.toHaveBeenCalled();
+    expect(streamResumeSession).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when new session cwd is missing", async () => {
     limiterCheck.mockReturnValue({
       allowed: true,
@@ -168,6 +300,39 @@ describe("POST /api/chat/stream", () => {
 
     expect(response.status).toBe(400);
     expect(streamNewSession).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when plan mode new session misses planSessionId", async () => {
+    limiterCheck.mockReturnValue({
+      allowed: true,
+      remaining: 10,
+      retryAfterMs: 1000,
+    });
+    getAuthStatus.mockResolvedValue({
+      ready: true,
+      loginMethod: "chatgpt",
+    });
+
+    const { POST } = await import("@/app/api/chat/stream/route");
+    const response = await POST(
+      new Request("http://localhost/api/chat/stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-app-access-code": "secret",
+        },
+        body: JSON.stringify({
+          model: "gpt-5.4",
+          cwd: "D:\\code\\CodexMob",
+          input: "计划一个改造",
+          mode: "plan",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.message).toContain("planSessionId");
   });
 
   it("maps resume sandbox argument error to readable message", async () => {

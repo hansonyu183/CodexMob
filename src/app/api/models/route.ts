@@ -18,6 +18,19 @@ const FALLBACK_MODELS = [
   "gpt-5.1-codex-mini",
 ];
 
+const DEFAULT_CONTEXT_WINDOW = 128_000;
+
+const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  "gpt-5.4": 200_000,
+  "gpt-5.4-mini": 128_000,
+  "gpt-5.3-codex": 200_000,
+  "gpt-5.3-codex-spark": 128_000,
+  "gpt-5.2-codex": 128_000,
+  "gpt-5.2": 128_000,
+  "gpt-5.1-codex-max": 128_000,
+  "gpt-5.1-codex-mini": 128_000,
+};
+
 export async function GET(request: Request) {
   const denied = verifyAccessCode(request, serverEnv.appAccessCode);
   if (denied) {
@@ -37,6 +50,14 @@ export async function GET(request: Request) {
       ? defaultModel
       : models[0],
     models,
+    modelCaps: Object.fromEntries(
+      models.map((model) => [
+        model,
+        {
+          contextWindow: MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW,
+        },
+      ]),
+    ),
   };
 
   return NextResponse.json(payload, { status: 200 });

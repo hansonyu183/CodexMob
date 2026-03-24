@@ -20,6 +20,9 @@ import type {
   HistoryConversation,
   HistoryMessage,
   ModelsResponse,
+  PlanAnswer,
+  PlanProgress,
+  PlanQuestion,
   RuntimeAuthStatus,
   StreamStatusEvent,
   StreamToolEvent,
@@ -35,6 +38,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 const CHAT_MODE_CACHE_KEY = "codexmob.chatModeByScope.v1";
 const MODEL_CACHE_KEY = "codexmob.modelByScope.v1";
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_CONTEXT_WINDOW = 128_000;
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 const TEXT_EXTENSIONS = new Set([
   ".txt",
@@ -77,6 +81,14 @@ interface ProcessEventRow {
   kind: "status" | "tool";
   text: string;
   createdAt: string;
+}
+
+interface ContextUsageState {
+  model: string;
+  usedTokens: number;
+  maxTokens: number;
+  remainingRatio: number;
+  estimated: boolean;
 }
 
 interface AttachmentPreviewState {
@@ -259,6 +271,8 @@ export function ChatApp() {
   const [chatMode, setChatMode] = useState<ChatMode>("default");
   const [modelByScope, setModelByScope] = useState<Record<string, string>>({});
   const [selectedModel, setSelectedModel] = useState(DEFAULT_SETTINGS.defaultModel);
+  const [modelCaps, setModelCaps] = useState<Record<string, { contextWindow: number }>>({});
+  const [contextUsage, setContextUsage] = useState<ContextUsageState | null>(null);
   const [customModelInput, setCustomModelInput] = useState("");
   const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
   const [conversationAttachments, setConversationAttachments] = useState<AttachmentRef[]>([]);
@@ -268,12 +282,20 @@ export function ChatApp() {
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string>("");
+  const [planQuestion, setPlanQuestion] = useState<PlanQuestion | null>(null);
+  const [planProgress, setPlanProgress] = useState<PlanProgress | null>(null);
+  const [planAnswerOption, setPlanAnswerOption] = useState("");
+  const [planAnswerNote, setPlanAnswerNote] = useState("");
+  const [planRootPrompt, setPlanRootPrompt] = useState("");
+  const [planSessionId, setPlanSessionId] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const stopRequestedRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previewLoadingRef = useRef<Set<string>>(new Set());
   const messageViewportRef = useRef<HTMLDivElement | null>(null);
   const previewObjectUrlRef = useRef<string>("");
+  const streamOutputCharsRef = useRef(0);
+  const streamBaseTokensRef = useRef(0);
 
   const activeConversation = useMemo(
     () => conversations.find((item) => item.id === activeConversationId),
@@ -293,6 +315,29 @@ export function ChatApp() {
     return "global";
   }, [activeConversationId, currentDraftCwd]);
   const modelScopeKey = modeScopeKey;
+
+  const getContextWindowForModel = useCallback(
+    (model: string) => modelCaps[model]?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    [modelCaps],
+  );
+
+  const updateEstimatedContextUsage = useCallback(
+    (model: string) => {
+      const maxTokens = getContextWindowForModel(model);
+      const usedTokens = Math.max(
+        0,
+        streamBaseTokensRef.current + Math.ceil(streamOutputCharsRef.current / 4),
+      );
+      setContextUsage({
+        model,
+        usedTokens,
+        maxTokens,
+        remainingRatio: Math.max(0, 1 - usedTokens / maxTokens),
+        estimated: true,
+      });
+    },
+    [getContextWindowForModel],
+  );
 
   const groupedConversations = useMemo(() => {
     const groups = new Map<
@@ -602,6 +647,7 @@ export function ChatApp() {
         ]);
         setRuntimeStatus(auth);
         setModels(modelPayload.models);
+        setModelCaps(modelPayload.modelCaps ?? {});
         setSettings((prev) => ({
           ...prev,
           defaultModel: modelPayload.defaultModel,
@@ -664,10 +710,29 @@ export function ChatApp() {
       applyTheme(localSettings.theme);
 
       if (localSettings.accessCode.trim()) {
-        await performStartupSync(localSettings.accessCode);
-      }
-      if (localSettings.accessCode.trim()) {
-        await refreshConversations(localSettings.accessCode);
+        await Promise.all([
+          refreshConversations(localSettings.accessCode),
+          loadRemoteMeta(localSettings.accessCode),
+        ]);
+
+        const runDeferredSync = async () => {
+          await performStartupSync(localSettings.accessCode);
+          await refreshConversations(localSettings.accessCode);
+        };
+
+        if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+          const win = window as Window & {
+            requestIdleCallback: (cb: () => void) => number;
+          };
+          win.requestIdleCallback(() => {
+            void runDeferredSync();
+          });
+        } else {
+          setTimeout(() => {
+            void runDeferredSync();
+          }, 300);
+        }
+        return;
       }
 
       await loadRemoteMeta(localSettings.accessCode);
@@ -863,6 +928,14 @@ export function ChatApp() {
         ...prev,
         [modeScopeKey]: mode,
       }));
+      if (mode !== "plan") {
+        setPlanQuestion(null);
+        setPlanProgress(null);
+        setPlanAnswerOption("");
+        setPlanAnswerNote("");
+        setPlanRootPrompt("");
+        setPlanSessionId("");
+      }
     },
     [modeScopeKey],
   );
@@ -889,6 +962,16 @@ export function ChatApp() {
     }
     return list;
   }, [models, selectedModel]);
+
+  const contextUsageLabel = useMemo(() => {
+    if (!contextUsage || contextUsage.model !== selectedModel) {
+      return "上下文剩余 --";
+    }
+    const ratio = Math.round(contextUsage.remainingRatio * 100);
+    const usedK = Math.max(0, Math.round(contextUsage.usedTokens / 1000));
+    const maxK = Math.max(1, Math.round(contextUsage.maxTokens / 1000));
+    return `上下文剩余 ${ratio}% (${usedK}k/${maxK}k)${contextUsage.estimated ? " · 估算" : ""}`;
+  }, [contextUsage, selectedModel]);
 
   const removeUploadItem = useCallback((localId: string) => {
     setUploadQueue((prev) => prev.filter((item) => item.localId !== localId));
@@ -1021,6 +1104,12 @@ export function ChatApp() {
     setMessages([]);
     setStreamEvents([]);
     setUploadQueue([]);
+    setPlanQuestion(null);
+    setPlanProgress(null);
+    setPlanAnswerOption("");
+    setPlanAnswerNote("");
+    setPlanRootPrompt("");
+    setPlanSessionId("");
     setNotice("请输入首条消息以创建会话");
     setDrawerOpen(false);
   }, [selectedProjectCwd, settings.accessCode]);
@@ -1032,6 +1121,9 @@ export function ChatApp() {
       model: string;
       prompt: string;
       mode: ChatMode;
+      planSessionId?: string;
+      planAnswer?: PlanAnswer;
+      planAnswers?: PlanAnswer[];
       attachments: UploadItem[];
       assistantDraftId: string;
     }) => {
@@ -1052,9 +1144,37 @@ export function ChatApp() {
       });
 
       let assistantText = "";
+      let bufferedTokenText = "";
+      let rafFlushId: number | null = null;
       let hasError = false;
 
+      const flushAssistantText = () => {
+        if (!bufferedTokenText) {
+          return;
+        }
+        assistantText += bufferedTokenText;
+        bufferedTokenText = "";
+        setMessages((prev) =>
+          prev.map((item) =>
+            item.id === input.assistantDraftId ? { ...item, content: assistantText } : item,
+          ),
+        );
+      };
+
+      const scheduleAssistantFlush = () => {
+        if (rafFlushId !== null) {
+          return;
+        }
+        rafFlushId = window.requestAnimationFrame(() => {
+          rafFlushId = null;
+          flushAssistantText();
+        });
+      };
+
       try {
+        streamOutputCharsRef.current = 0;
+        streamBaseTokensRef.current = Math.ceil(input.prompt.length / 4);
+        updateEstimatedContextUsage(input.model);
         const response = await fetch("/api/chat/stream", {
           method: "POST",
           headers: {
@@ -1067,6 +1187,9 @@ export function ChatApp() {
             model: input.model,
             input: input.prompt,
             mode: input.mode,
+            planSessionId: input.planSessionId,
+            planAnswer: input.planAnswer,
+            planAnswers: input.planAnswers,
             attachments: input.attachments,
           }),
           signal: controller.signal,
@@ -1075,14 +1198,19 @@ export function ChatApp() {
         let resolvedConversationId = input.conversationId ?? "";
         await consumeSse(response, {
           onToken(token) {
-            assistantText += token;
-            setMessages((prev) =>
-              prev.map((item) =>
-                item.id === input.assistantDraftId ? { ...item, content: assistantText } : item,
-              ),
-            );
+            bufferedTokenText += token;
+            streamOutputCharsRef.current += token.length;
+            if (streamOutputCharsRef.current % 24 === 0) {
+              updateEstimatedContextUsage(input.model);
+            }
+            scheduleAssistantFlush();
           },
           onDone(donePayload) {
+            flushAssistantText();
+            if (rafFlushId !== null) {
+              window.cancelAnimationFrame(rafFlushId);
+              rafFlushId = null;
+            }
             if (typeof donePayload.conversationId === "string" && donePayload.conversationId.trim()) {
               resolvedConversationId = donePayload.conversationId.trim();
             }
@@ -1090,10 +1218,28 @@ export function ChatApp() {
               kind: "status",
               text: "完成",
             });
+            const maxTokens = getContextWindowForModel(input.model);
+            const usage = donePayload.usage;
+            const usedTokens =
+              (usage?.input_tokens ?? 0) +
+              (usage?.output_tokens ?? 0) +
+              (usage?.cached_input_tokens ?? 0);
+            if (usedTokens > 0) {
+              setContextUsage({
+                model: input.model,
+                usedTokens,
+                maxTokens,
+                remainingRatio: Math.max(0, 1 - usedTokens / maxTokens),
+                estimated: false,
+              });
+            } else {
+              updateEstimatedContextUsage(input.model);
+            }
             setShowJumpToLatest(false);
           },
           onError(error) {
             hasError = true;
+            flushAssistantText();
             setNotice(error.message);
             appendProcessEvent({
               kind: "status",
@@ -1113,6 +1259,36 @@ export function ChatApp() {
               text: `${event.name} · ${event.state}${event.summary ? ` · ${event.summary}` : ""}`,
             });
           },
+          onPlanProgress(event) {
+            setPlanProgress(event);
+            if (event.summary) {
+              appendProcessEvent({
+                kind: "status",
+                text: `计划进度 · ${event.summary}`,
+              });
+            }
+          },
+          onPlanQuestion(event) {
+            setPlanQuestion(event);
+            const recommended =
+              event.options.find((opt) => opt.recommended)?.value ??
+              event.options[0]?.value ??
+              "";
+            setPlanAnswerOption(recommended);
+            setPlanAnswerNote("");
+            appendProcessEvent({
+              kind: "status",
+              text: "请先回答当前关键问题后继续",
+            });
+          },
+          onPlanReady(event) {
+            setPlanQuestion(null);
+            setPlanProgress(event);
+            appendProcessEvent({
+              kind: "status",
+              text: "澄清完成，点击“生成最终计划”。",
+            });
+          },
         });
 
         if (!hasError && resolvedConversationId) {
@@ -1127,6 +1303,9 @@ export function ChatApp() {
             }));
           }
           setActiveConversationId(resolvedConversationId);
+          if (resolvedConversationId !== input.conversationId) {
+            setPlanSessionId("");
+          }
           setNewConversationCwd(null);
           setUploadQueue([]);
           await refreshConversations(settings.accessCode);
@@ -1134,6 +1313,11 @@ export function ChatApp() {
           await loadConversationAttachments(settings.accessCode, resolvedConversationId);
         }
       } catch (error) {
+        flushAssistantText();
+        if (rafFlushId !== null) {
+          window.cancelAnimationFrame(rafFlushId);
+          rafFlushId = null;
+        }
         const isStopRequested = stopRequestedRef.current;
         const isAbortError =
           error instanceof DOMException
@@ -1156,6 +1340,11 @@ export function ChatApp() {
           setNotice(message);
         }
       } finally {
+        flushAssistantText();
+        if (rafFlushId !== null) {
+          window.cancelAnimationFrame(rafFlushId);
+          rafFlushId = null;
+        }
         setIsStreaming(false);
         abortRef.current = null;
         stopRequestedRef.current = false;
@@ -1163,10 +1352,12 @@ export function ChatApp() {
     },
     [
       appendProcessEvent,
+      getContextWindowForModel,
       loadConversationAttachments,
       refreshConversations,
       refreshMessages,
       settings.accessCode,
+      updateEstimatedContextUsage,
     ],
   );
 
@@ -1205,7 +1396,18 @@ export function ChatApp() {
         size: item.size,
       }));
 
+    const currentPlanSessionId =
+      chatMode === "plan"
+        ? planSessionId || nanoid()
+        : "";
+    if (chatMode === "plan" && !planSessionId) {
+      setPlanSessionId(currentPlanSessionId);
+    }
+
     setDraft("");
+    if (chatMode === "plan" && !planRootPrompt) {
+      setPlanRootPrompt(content);
+    }
     const draftConversationId = conversationId ?? `draft-${nanoid()}`;
     const userDraft = toHistoryMessage(draftConversationId, "user", content);
     const assistantDraft = toHistoryMessage(draftConversationId, "assistant", "");
@@ -1217,6 +1419,8 @@ export function ChatApp() {
       model: selectedModel.trim() || activeConversation?.model || settings.defaultModel,
       prompt: content,
       mode: chatMode,
+      planSessionId: currentPlanSessionId || undefined,
+      planAnswer: undefined,
       attachments: readyAttachments,
       assistantDraftId: assistantDraft.id,
     });
@@ -1226,9 +1430,140 @@ export function ChatApp() {
     draft,
     isStreaming,
     newConversationCwd,
+    planRootPrompt,
     selectedModel,
     selectedProjectCwd,
     settings.accessCode,
+    settings.defaultModel,
+    streamAssistant,
+    uploadQueue,
+  ]);
+
+  const handleSubmitPlanAnswer = useCallback(async () => {
+    if (!planQuestion || isStreaming) {
+      return;
+    }
+
+    const conversationId = activeConversation?.id;
+    const cwd = activeConversation?.cwd?.trim() || newConversationCwd?.trim() || selectedProjectCwd?.trim() || "";
+    if (!cwd) {
+      setNotice("请先选择项目后再继续");
+      return;
+    }
+
+    const option = planAnswerOption.trim();
+    if (!option) {
+      setNotice("请先选择一个选项");
+      return;
+    }
+
+    const answer: PlanAnswer = {
+      questionId: planQuestion.id,
+      option,
+      note: planAnswerNote.trim() ? planAnswerNote.trim() : undefined,
+    };
+
+    const currentPlanSessionId = planSessionId || nanoid();
+    if (!planSessionId) {
+      setPlanSessionId(currentPlanSessionId);
+    }
+
+    const answerText = `[计划回答] ${answer.questionId}: ${answer.option}${answer.note ? `\n补充: ${answer.note}` : ""}`;
+    const draftConversationId = conversationId ?? `draft-${nanoid()}`;
+    const userDraft = toHistoryMessage(draftConversationId, "user", answerText);
+    const assistantDraft = toHistoryMessage(draftConversationId, "assistant", "");
+    setMessages((prev) => [...prev, userDraft, assistantDraft]);
+
+    const readyAttachments = uploadQueue
+      .filter((item) => item.status === "ready")
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        path: item.path,
+        kind: item.kind,
+        size: item.size,
+      }));
+
+    await streamAssistant({
+      conversationId,
+      cwd,
+      model: selectedModel.trim() || activeConversation?.model || settings.defaultModel,
+      prompt: planRootPrompt || draft || "继续澄清并生成计划",
+      mode: "plan",
+      planSessionId: currentPlanSessionId,
+      planAnswer: answer,
+      planAnswers: undefined,
+      attachments: readyAttachments,
+      assistantDraftId: assistantDraft.id,
+    });
+  }, [
+    activeConversation,
+    draft,
+    isStreaming,
+    newConversationCwd,
+    planAnswerNote,
+    planAnswerOption,
+    planQuestion,
+    planRootPrompt,
+    planSessionId,
+    selectedModel,
+    selectedProjectCwd,
+    settings.defaultModel,
+    streamAssistant,
+    uploadQueue,
+  ]);
+
+  const handleFinalizePlan = useCallback(async () => {
+    if (isStreaming || chatMode !== "plan") {
+      return;
+    }
+    const conversationId = activeConversation?.id;
+    const cwd = activeConversation?.cwd?.trim() || newConversationCwd?.trim() || selectedProjectCwd?.trim() || "";
+    if (!cwd) {
+      setNotice("请先选择项目后再继续");
+      return;
+    }
+
+    const draftConversationId = conversationId ?? `draft-${nanoid()}`;
+    const userDraft = toHistoryMessage(draftConversationId, "user", "请基于已确认信息输出最终计划。");
+    const assistantDraft = toHistoryMessage(draftConversationId, "assistant", "");
+    setMessages((prev) => [...prev, userDraft, assistantDraft]);
+    appendProcessEvent({
+      kind: "status",
+      text: "正在生成最终计划，请稍候...",
+    });
+
+    const readyAttachments = uploadQueue
+      .filter((item) => item.status === "ready")
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        path: item.path,
+        kind: item.kind,
+        size: item.size,
+      }));
+
+    await streamAssistant({
+      conversationId,
+      cwd,
+      model: selectedModel.trim() || activeConversation?.model || settings.defaultModel,
+      prompt: planRootPrompt || "请基于已确认信息输出最终计划。",
+      mode: "plan",
+      planSessionId: planSessionId || undefined,
+      planAnswer: undefined,
+      attachments: readyAttachments,
+      assistantDraftId: assistantDraft.id,
+    });
+  }, [
+    activeConversation,
+    appendProcessEvent,
+    chatMode,
+    isStreaming,
+    newConversationCwd,
+    planRootPrompt,
+    planSessionId,
+    selectedModel,
+    selectedProjectCwd,
     settings.defaultModel,
     streamAssistant,
     uploadQueue,
@@ -1397,6 +1732,7 @@ export function ChatApp() {
             }}
           />
         </div>
+        <div className="hidden text-xs text-app-muted md:block">{contextUsageLabel}</div>
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}
@@ -1469,6 +1805,12 @@ export function ChatApp() {
                             setNewConversationCwd(null);
                             setUploadQueue([]);
                             setStreamEvents([]);
+                            setPlanQuestion(null);
+                            setPlanProgress(null);
+                            setPlanAnswerOption("");
+                            setPlanAnswerNote("");
+                            setPlanRootPrompt("");
+                            setPlanSessionId("");
                             setDrawerOpen(false);
                           }}
                         >
@@ -1565,9 +1907,76 @@ export function ChatApp() {
                   ) : null}
                 </div>
               ) : null}
+              <div className="text-[11px] text-app-muted md:hidden">{contextUsageLabel}</div>
               {notice ? (
                 <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
                   {notice}
+                </div>
+              ) : null}
+              {chatMode === "plan" && planQuestion ? (
+                <div className="rounded-lg border border-app bg-app px-3 py-3">
+                  <div className="text-xs text-app-muted">
+                    计划模式 · 第 {planProgress?.round ?? 1} 轮{(planProgress?.isSupplementalRound ?? false) ? "（补轮）" : ""}
+                  </div>
+                  <div className="mt-1 text-sm text-app">{planQuestion.prompt}</div>
+                  <div className="mt-2 space-y-1">
+                    {planQuestion.options.map((option) => (
+                      <label
+                        key={`${planQuestion.id}-${option.value}`}
+                        className={cn(
+                          "flex cursor-pointer items-start gap-2 rounded-md border px-2 py-1.5 text-xs",
+                          planAnswerOption === option.value ? "border-sky-400/60 bg-sky-500/10" : "border-app",
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name={`plan-question-${planQuestion.id}`}
+                          checked={planAnswerOption === option.value}
+                          onChange={() => setPlanAnswerOption(option.value)}
+                          className="mt-0.5"
+                        />
+                        <span>
+                          <span className="text-app">{option.label}</span>
+                          <span className="ml-1 text-app-muted">{option.description}</span>
+                          {option.recommended ? <span className="ml-1 text-emerald-300">（推荐）</span> : null}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {planQuestion.allowNote ? (
+                    <input
+                      type="text"
+                      value={planAnswerNote}
+                      onChange={(event) => setPlanAnswerNote(event.target.value)}
+                      placeholder="补充说明（可选）"
+                      className="mt-2 w-full rounded-md border border-app bg-panel px-2 py-1.5 text-base text-app md:text-sm"
+                    />
+                  ) : null}
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleSubmitPlanAnswer()}
+                      disabled={isStreaming}
+                      className="rounded-lg border border-sky-400/50 bg-sky-500/20 px-3 py-1.5 text-xs text-sky-100 disabled:opacity-50"
+                    >
+                      提交并继续
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {chatMode === "plan" && !planQuestion && planProgress?.phase === "ready_to_plan" ? (
+                <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2">
+                  <div className="text-xs text-emerald-200">澄清已完成，可生成最终计划。</div>
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleFinalizePlan()}
+                      disabled={isStreaming}
+                      className="rounded-lg border border-emerald-400/50 bg-emerald-500/20 px-3 py-1.5 text-xs text-emerald-100 disabled:opacity-50"
+                    >
+                      生成最终计划
+                    </button>
+                  </div>
                 </div>
               ) : null}
               {uploadQueue.length > 0 ? (

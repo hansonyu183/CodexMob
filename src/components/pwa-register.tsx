@@ -21,7 +21,7 @@ export function PwaRegister() {
 
     void (async () => {
       try {
-        const registration = await navigator.serviceWorker.register("/sw.js?v=4", {
+        const registration = await navigator.serviceWorker.register("/sw.js?v=5", {
           updateViaCache: "none",
         });
 
